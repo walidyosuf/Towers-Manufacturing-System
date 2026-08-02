@@ -1,0 +1,2233 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower Manufacturing Management System</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SheetJS for Excel Processing -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    
+    <!-- jsPDF for PDF Reports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* ===== جميع الأنماط الأصلية ===== */
+        :root {
+            --primary-color: #1a237e;
+            --secondary-color: #ff9800;
+            --warning-color: #ffc107;
+            --danger-color: #f44336;
+            --info-color: #2196f3;
+            --success-color: #4caf50;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f5f7fa;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            padding-top: 80px;
+        }
+
+        /* RTL Support */
+        .rtl {
+            direction: rtl;
+            text-align: right;
+        }
+
+        .rtl .text-right {
+            text-align: left !important;
+        }
+
+        .rtl .text-left {
+            text-align: right !important;
+        }
+
+        .rtl .ml-2 {
+            margin-left: 0 !important;
+            margin-right: 0.5rem !important;
+        }
+
+        .rtl .mr-2 {
+            margin-right: 0 !important;
+            margin-left: 0.5rem !important;
+        }
+
+        .rtl .flex-row-reverse {
+            flex-direction: row-reverse;
+        }
+
+        .rtl .text-start {
+            text-align: end !important;
+        }
+
+        .rtl .text-end {
+            text-align: start !important;
+        }
+
+        .rtl .float-right {
+            float: left !important;
+        }
+
+        .rtl .float-left {
+            float: right !important;
+        }
+
+        .rtl .table th {
+            text-align: right;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding-top: 120px;
+            }
+            
+            .container {
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
+            }
+            
+            .mobile-hidden {
+                display: none !important;
+            }
+            
+            .mobile-full-width {
+                width: 100% !important;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+            }
+            
+            .mobile-stack {
+                display: block !important;
+            }
+            
+            .mobile-stack > * {
+                margin-bottom: 1rem;
+                width: 100% !important;
+            }
+            
+            .mobile-text-center {
+                text-align: center !important;
+            }
+            
+            .mobile-padding {
+                padding: 1rem !important;
+            }
+            
+            table {
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+            
+            .card {
+                margin: 0.5rem !important;
+                padding: 1rem !important;
+            }
+            
+            .modal-content {
+                width: 95% !important;
+                margin: 1rem !important;
+            }
+            
+            .form-grid {
+                grid-template-columns: 1fr !important;
+                gap: 0.75rem !important;
+            }
+            
+            .action-buttons {
+                flex-direction: column !important;
+                gap: 0.5rem !important;
+            }
+            
+            .action-buttons button {
+                width: 100% !important;
+            }
+            
+            .sidebar {
+                width: 100% !important;
+                position: static !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+            
+            .main-content {
+                margin-left: 0 !important;
+                padding: 1rem !important;
+            }
+        }
+
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .tablet-grid-2 {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+            
+            .tablet-full-width {
+                width: 100% !important;
+            }
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-100%); }
+            to { transform: translateX(0); }
+        }
+
+        @keyframes slideInRight {
+            from { transform: translateX(120%); }
+            to { transform: translateX(0); }
+        }
+
+        @keyframes slideInLeft {
+            from { transform: translateX(-120%); }
+            to { transform: translateX(0); }
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e5e7eb;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            border-bottom: 2px solid #f3f4f6;
+            padding: 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-body {
+            padding: 1.25rem;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.625rem 1.25rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            transition: all 0.2s ease;
+            border: none;
+            cursor: pointer;
+            gap: 0.5rem;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0d1a5c;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #e68900;
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #d32f2f;
+        }
+
+        .btn-warning {
+            background: var(--warning-color);
+            color: #333;
+        }
+
+        .btn-warning:hover {
+            background: #e6ac00;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 2px solid #d1d5db;
+            color: #374151;
+        }
+
+        .btn-outline:hover {
+            background: #f9fafb;
+            border-color: #9ca3af;
+        }
+
+        .btn-sm {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
+        }
+
+        .btn-lg {
+            padding: 0.875rem 1.75rem;
+            font-size: 1rem;
+        }
+
+        .input-group {
+            margin-bottom: 1rem;
+        }
+
+        .input-label {
+            display: block;
+            margin-bottom: 0.375rem;
+            font-weight: 500;
+            color: #374151;
+            font-size: 0.875rem;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 0.625rem 0.875rem;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            transition: all 0.2s ease;
+            background: white;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(26, 35, 126, 0.1);
+        }
+
+        .input-field.error {
+            border-color: var(--danger-color);
+        }
+
+        .error-message {
+            color: var(--danger-color);
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+            display: block;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .badge-primary {
+            background: #e8eaf6;
+            color: var(--primary-color);
+        }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .modal.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow-y: auto;
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        .modal.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-header {
+            padding: 1.25rem;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-body {
+            padding: 1.25rem;
+        }
+
+        .modal-footer {
+            padding: 1.25rem;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 100px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            max-width: 320px;
+            width: auto;
+        }
+
+        .rtl .toast-container {
+            left: 20px;
+            right: auto;
+        }
+
+        .toast {
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            animation: slideInRight 0.3s ease-out;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            color: white;
+            transform: translateX(120%);
+            transition: transform 0.3s ease-out;
+            max-width: 300px;
+            font-size: 0.875rem;
+        }
+
+        .rtl .toast {
+            animation: slideInLeft 0.3s ease-out;
+            transform: translateX(-120%);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .rtl .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast-success {
+            background: var(--success-color);
+        }
+
+        .toast-error {
+            background: var(--danger-color);
+        }
+
+        .toast-warning {
+            background: var(--warning-color);
+        }
+
+        .toast-info {
+            background: var(--info-color);
+        }
+
+        .toast-close {
+            margin-right: auto;
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            opacity: 0.8;
+            padding: 0.25rem;
+            font-size: 0.75rem;
+        }
+
+        .rtl .toast-close {
+            margin-right: 0;
+            margin-left: auto;
+        }
+
+        .toast-close:hover {
+            opacity: 1;
+        }
+
+        .progress {
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--primary-color);
+            transition: width 0.3s ease;
+        }
+
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 220px;
+            height: 100vh;
+            background: linear-gradient(to bottom, #1a237e, #283593);
+            color: white;
+            overflow-y: auto;
+            z-index: 100;
+            padding-top: 80px;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .rtl .sidebar {
+            left: auto;
+            right: 0;
+            box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .sidebar-tabs {
+            display: flex;
+            flex-direction: column;
+            padding: 1rem 0;
+        }
+
+        .sidebar-tab {
+            padding: 0.875rem 1.25rem;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.8);
+            border-left: 3px solid transparent;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            margin: 0.25rem 0;
+        }
+
+        .rtl .sidebar-tab {
+            border-left: none;
+            border-right: 3px solid transparent;
+        }
+
+        .sidebar-tab:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+            border-left-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .rtl .sidebar-tab:hover {
+            border-right-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .sidebar-tab.active {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.15);
+            border-left-color: var(--secondary-color);
+        }
+
+        .rtl .sidebar-tab.active {
+            border-right-color: var(--secondary-color);
+        }
+
+        .sidebar-tab i {
+            width: 20px;
+            text-align: center;
+            font-size: 1.1rem;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            position: relative;
+            width: 100%;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 600px;
+        }
+
+        .table th {
+            background: #f9fafb;
+            padding: 0.875rem 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 2px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            white-space: nowrap;
+        }
+
+        .rtl .table th {
+            text-align: right;
+        }
+
+        .table td {
+            padding: 0.875rem 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            color: #4b5563;
+        }
+
+        .table tr:hover {
+            background: #f9fafb;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e5e7eb;
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
+        .grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+        .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+        .grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+        @media (max-width: 768px) {
+            .grid-cols-2,
+            .grid-cols-3,
+            .grid-cols-4 {
+                grid-template-columns: repeat(1, 1fr);
+            }
+            
+            .sidebar {
+                width: 100% !important;
+                position: static !important;
+                height: auto !important;
+                padding-top: 0;
+                background: #1a237e;
+            }
+            
+            .sidebar-tabs {
+                flex-direction: row;
+                overflow-x: auto;
+                padding: 0.5rem;
+            }
+            
+            .sidebar-tab {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.875rem;
+                border-left: none;
+                border-bottom: 3px solid transparent;
+                margin: 0 0.25rem;
+            }
+            
+            .rtl .sidebar-tab {
+                border-right: none;
+                border-bottom: 3px solid transparent;
+            }
+            
+            .sidebar-tab.active {
+                border-left: none;
+                border-bottom-color: var(--secondary-color);
+            }
+            
+            .rtl .sidebar-tab.active {
+                border-right: none;
+                border-bottom-color: var(--secondary-color);
+            }
+            
+            .main-content {
+                margin-left: 0 !important;
+                padding: 1rem !important;
+            }
+            
+            .rtl .toast-container {
+                left: 10px;
+                right: auto;
+            }
+        }
+
+        .backup-card {
+            border: 2px dashed #d1d5db;
+            transition: all 0.3s ease;
+        }
+
+        .backup-card:hover {
+            border-color: var(--primary-color);
+            background: #f0f9ff;
+        }
+
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            
+            #reportResults,
+            #reportResults * {
+                visibility: visible;
+            }
+            
+            #reportResults {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                box-shadow: none;
+                border: none;
+            }
+            
+            .no-print,
+            .action-buttons {
+                display: none !important;
+            }
+            
+            .table {
+                font-size: 10pt !important;
+            }
+            
+            .table th,
+            .table td {
+                padding: 0.5rem !important;
+            }
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .card {
+                background: #1f2937;
+                border-color: #374151;
+                color: #f9fafb;
+            }
+            
+            .table th {
+                background: #111827;
+                color: #f9fafb;
+                border-color: #374151;
+            }
+            
+            .table td {
+                color: #d1d5db;
+                border-color: #374151;
+            }
+            
+            .input-field {
+                background: #374151;
+                border-color: #4b5563;
+                color: #f9fafb;
+            }
+            
+            .input-field:focus {
+                border-color: var(--primary-color);
+            }
+            
+            .sidebar {
+                background: linear-gradient(to bottom, #1a237e, #283593);
+            }
+        }
+
+        .scroll-to-top {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--primary-color);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .rtl .scroll-to-top {
+            right: auto;
+            left: 20px;
+        }
+
+        .scroll-to-top:hover {
+            background: #0d1a5c;
+            transform: translateY(-2px);
+        }
+
+        .current-phase {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background: #e8eaf6;
+            color: #1a237e;
+            margin-top: 0.25rem;
+        }
+
+        .completed-first {
+            background: #f0fdf4 !important;
+        }
+        
+        .language-switcher {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .language-btn.active {
+            background: var(--primary-color);
+            color: white;
+        }
+        
+        .delete-btn {
+            transition: all 0.3s ease;
+        }
+        
+        .delete-btn:hover {
+            transform: scale(1.1);
+        }
+        
+        .confirmation-dialog {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        
+        .confirmation-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 1.5rem;
+        }
+        
+        .main-content {
+            margin-left: 220px;
+            padding: 1.5rem;
+            min-height: 100vh;
+            transition: margin-left 0.3s ease;
+        }
+
+        .rtl .main-content {
+            margin-left: 0;
+            margin-right: 220px;
+        }
+
+        .fixed-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 80px;
+            background: #1a237e;
+            color: white;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .rtl .fixed-header {
+            left: auto;
+            right: 0;
+        }
+
+        .fixed-header .title-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .fixed-header .title-container i {
+            font-size: 2rem;
+            color: var(--secondary-color);
+        }
+
+        .fixed-header .title-text h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .fixed-header .title-text p {
+            margin: 0;
+            font-size: 0.875rem;
+            opacity: 0.9;
+        }
+
+        .dashboard-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+        }
+
+        .dashboard-stat-card {
+            border-radius: 16px;
+            overflow: hidden;
+            position: relative;
+            transition: all 0.3s ease;
+            color: white;
+        }
+
+        .dashboard-stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .dashboard-stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .stat-card-1 {
+            background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+        }
+
+        .stat-card-2 {
+            background: linear-gradient(135deg, #ff9800 0%, #ff5722 100%);
+        }
+
+        .stat-card-3 {
+            background: linear-gradient(135deg, #2196f3 0%, #03a9f4 100%);
+        }
+
+        .stat-card-4 {
+            background: linear-gradient(135deg, #4caf50 0%, #8bc34a 100%);
+        }
+
+        .dashboard-progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .dashboard-progress-fill {
+            height: 100%;
+            background: white;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .report-card {
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+        }
+
+        .report-table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 0.9rem;
+        }
+
+        .report-table th {
+            background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+            color: white;
+            padding: 1rem;
+            font-weight: 600;
+            text-align: left;
+            border: none;
+            position: sticky;
+            top: 0;
+        }
+
+        .report-table td {
+            padding: 0.875rem 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            color: #4b5563;
+        }
+
+        .report-table tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+
+        .report-table tr:hover {
+            background-color: #f3f4f6;
+        }
+
+        .report-header {
+            background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 16px 16px 0 0;
+        }
+
+        .report-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        .report-subtitle {
+            font-size: 0.875rem;
+            opacity: 0.9;
+            margin: 0.5rem 0 0 0;
+        }
+
+        .app-footer {
+            text-align: center;
+            padding: 1.5rem;
+            background: #1a237e;
+            color: white;
+            margin-top: 3rem;
+            border-radius: 16px 16px 0 0;
+        }
+
+        .app-footer p {
+            margin: 0;
+            font-size: 0.875rem;
+            opacity: 0.9;
+        }
+
+        .creator-credit {
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+            opacity: 0.7;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #1a237e;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-completed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-in-progress {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-pending {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .dashboard-progress-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: conic-gradient(var(--primary-color) 0deg, #e5e7eb 0deg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            position: relative;
+        }
+        .dashboard-progress-circle-inner {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .downtime-breakdown-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: #e5e7eb;
+            overflow: hidden;
+        }
+        .downtime-breakdown-fill {
+            height: 100%;
+            border-radius: 4px;
+        }
+
+        /* Balance Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #1a237e;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+
+        @media (max-width: 768px) {
+            .fixed-header {
+                height: 120px;
+                padding: 0.5rem;
+                flex-direction: column;
+                justify-content: center;
+            }
+            
+            .fixed-header .title-text h1 {
+                font-size: 1.2rem;
+            }
+            
+            .fixed-header .title-text p {
+                font-size: 0.75rem;
+            }
+
+            .dashboard-stat-card {
+                margin-bottom: 1rem;
+            }
+
+            .report-table {
+                font-size: 0.8rem;
+            }
+
+            .report-table th,
+            .report-table td {
+                padding: 0.5rem;
+            }
+        }
+
+        .compact-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .compact-table th {
+            background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+            color: white;
+            padding: 0.75rem;
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-align: left;
+            border: none;
+            position: sticky;
+            top: 0;
+            white-space: normal;
+        }
+        
+        .compact-table td {
+            padding: 0.6rem;
+            border-bottom: 1px solid #e5e7eb;
+            color: #4b5563;
+            font-size: 0.8rem;
+            white-space: normal;
+        }
+        
+        .compact-table tr:hover {
+            background-color: #f3f4f6;
+        }
+        
+        .report-table-wrapper {
+            overflow-x: auto;
+            max-width: 100%;
+        }
+        
+        .operation-status-table {
+            min-width: auto !important;
+            width: 100% !important;
+        }
+        
+        .operation-status-table th,
+        .operation-status-table td {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+        }
+        
+        @media (max-width: 1024px) {
+            .operation-status-table th,
+            .operation-status-table td {
+                padding: 0.4rem 0.6rem;
+                font-size: 0.75rem;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .operation-status-table th,
+            .operation-status-table td {
+                padding: 0.3rem 0.5rem;
+                font-size: 0.7rem;
+            }
+        }
+
+        /* Login screen overrides */
+        #loginScreen {
+            z-index: 9999;
+        }
+        .hidden-main {
+            display: none !important;
+        }
+    </style>
+</head>
+<body class="text-gray-800 ltr">
+
+    <!-- ============================================================ -->
+    <!-- LOGIN SCREEN (ثنائي اللغة مع حقل كلمة المرور)                  -->
+    <!-- ============================================================ -->
+    <div id="loginScreen" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-indigo-800" data-i18n="loginTitle">Login</h2>
+                <div class="language-switcher">
+                    <button onclick="setLanguage('en')" class="btn btn-sm btn-outline language-btn" id="loginBtnEn">
+                        <i class="fa-solid fa-language"></i> EN
+                    </button>
+                    <button onclick="setLanguage('ar')" class="btn btn-sm btn-outline language-btn" id="loginBtnAr">
+                        <i class="fa-solid fa-language"></i> عربي
+                    </button>
+                </div>
+            </div>
+            <form id="loginForm" onsubmit="event.preventDefault(); handleLogin();">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="username">Username</label>
+                    <input type="text" id="loginUsername" class="input-field w-full" placeholder="Enter username" data-i18n-placeholder="usernamePlaceholder" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" data-i18n="password">Password</label>
+                    <input type="password" id="loginPassword" class="input-field w-full" placeholder="Enter password" data-i18n-placeholder="passwordPlaceholder" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-full" data-i18n="loginButton">Login</button>
+            </form>
+            <div class="mt-4 text-center text-sm text-gray-500" data-i18n="loginHint">
+                <p>For testing: use any username and choose the appropriate role</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- FIXED HEADER                                                  -->
+    <!-- ============================================================ -->
+    <div class="fixed-header no-print" id="mainHeader">
+        <div class="title-container">
+            <i class="fa-solid fa-tower-cell"></i>
+            <div class="title-text">
+                <h1 data-i18n="appTitle">Tower Manufacturing Management System</h1>
+                <p data-i18n="appSubtitle">66KV - 220KV - 500KV - Telecom</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="language-switcher">
+                <button onclick="setLanguage('en')" class="btn btn-sm btn-outline language-btn" id="btnEn">
+                    <i class="fa-solid fa-language"></i> EN
+                </button>
+                <button onclick="setLanguage('ar')" class="btn btn-sm btn-outline language-btn" id="btnAr">
+                    <i class="fa-solid fa-language"></i> عربي
+                </button>
+            </div>
+            <!-- Logout Button -->
+            <button onclick="logout()" class="btn btn-sm btn-danger">
+                <i class="fa-solid fa-sign-out-alt"></i> <span data-i18n="logout">Logout</span>
+            </button>
+            <div class="flex flex-wrap gap-2">
+                <span id="currentDataPath" class="text-xs text-white bg-blue-800 px-2 py-1 rounded"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- SIDEBAR NAVIGATION (جميع الأزرار مع data-tab)                -->
+    <!-- ============================================================ -->
+    <div class="sidebar" id="mainSidebar">
+        <div class="sidebar-tabs">
+            <button data-tab="dashboard" class="sidebar-tab" onclick="switchTab('dashboard')">
+                <i class="fa-solid fa-chart-simple"></i>
+                <span class="mobile-hidden" data-i18n="dashboard">Dashboard</span>
+            </button>
+            <button data-tab="models" class="sidebar-tab" onclick="switchTab('models')">
+                <i class="fa-solid fa-database"></i>
+                <span class="mobile-hidden" data-i18n="database">Database</span>
+            </button>
+            <button data-tab="workOrder" class="sidebar-tab" onclick="switchTab('workOrder')">
+                <i class="fa-solid fa-file-circle-plus"></i>
+                <span class="mobile-hidden" data-i18n="workOrders">Work Orders</span>
+            </button>
+            <button data-tab="production" class="sidebar-tab" onclick="switchTab('production')">
+                <i class="fa-solid fa-industry"></i>
+                <span class="mobile-hidden" data-i18n="dailyProduction">Daily Production</span>
+            </button>
+            <button data-tab="downtime" class="sidebar-tab" onclick="switchTab('downtime')">
+                <i class="fa-solid fa-clock"></i>
+                <span class="mobile-hidden" data-i18n="downtime">Downtime</span>
+            </button>
+            <button data-tab="ncr" class="sidebar-tab" onclick="switchTab('ncr')">
+                <i class="fa-solid fa-clipboard-list"></i>
+                <span class="mobile-hidden" data-i18n="ncrTitle">NCR</span>
+            </button>
+            <button data-tab="hr" class="sidebar-tab" onclick="switchTab('hr')">
+                <i class="fa-solid fa-users"></i>
+                <span class="mobile-hidden">HR</span>
+            </button>
+            <button data-tab="reports" class="sidebar-tab" onclick="switchTab('reports')">
+                <i class="fa-solid fa-chart-column"></i>
+                <span class="mobile-hidden" data-i18n="reports">Reports</span>
+            </button>
+            <button data-tab="settings" class="sidebar-tab" onclick="switchTab('settings')">
+                <i class="fa-solid fa-gear"></i>
+                <span class="mobile-hidden" data-i18n="settings">Settings</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- MAIN CONTENT                                                  -->
+    <!-- ============================================================ -->
+    <main class="main-content" id="mainContent">
+        <!-- DASHBOARD SECTION -->
+        <section id="dashboardSection" class="space-y-6">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-xl font-bold">
+                        <i class="fa-solid fa-chart-simple mr-2 text-indigo-600"></i> 
+                        <span data-i18n="dashboardTitle">Production Dashboard</span>
+                    </h2>
+                    <div class="text-xs text-gray-500">
+                        <span data-i18n="lastUpdated">Last updated</span>: <span id="dashboardTimestamp">-</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Statistics Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                        <div class="dashboard-stat-card stat-card-1 p-4">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm opacity-90" data-i18n="activeWorkOrders">Active Work Orders</p>
+                                    <p class="text-3xl font-bold mt-1" id="dashboardActiveWO">0</p>
+                                </div>
+                                <i class="fa-solid fa-file-lines text-3xl opacity-50"></i>
+                            </div>
+                        </div>
+                        <div class="dashboard-stat-card stat-card-2 p-4">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm opacity-90" data-i18n="totalDowntimeToday">Downtime (Yesterday)</p>
+                                    <p class="text-3xl font-bold mt-1" id="dashboardDowntimeToday">0 hrs</p>
+                                </div>
+                                <i class="fa-solid fa-clock text-3xl opacity-50"></i>
+                            </div>
+                        </div>
+                        <div class="dashboard-stat-card stat-card-3 p-4">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm opacity-90" data-i18n="productionToday">Production (Yesterday)</p>
+                                    <p class="text-3xl font-bold mt-1" id="dashboardProductionToday">0 tons</p>
+                                </div>
+                                <i class="fa-solid fa-industry text-3xl opacity-50"></i>
+                            </div>
+                        </div>
+                        <div class="dashboard-stat-card stat-card-4 p-4">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-sm opacity-90" data-i18n="finishedWorkOrders">Finished WOs</p>
+                                    <p class="text-3xl font-bold mt-1" id="dashboardFinishedWO">0</p>
+                                </div>
+                                <i class="fa-solid fa-check-circle text-3xl opacity-50"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Progress Cards for Minimum & Finishing -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                        <div class="card">
+                            <div class="card-header bg-blue-50">
+                                <h3 class="text-lg font-bold text-blue-800">
+                                    <i class="fa-solid fa-microchip mr-2"></i> <span data-i18n="minimumProgress">Minimum Operations Progress</span>
+                                </h3>
+                            </div>
+                            <div class="card-body text-center">
+                                <div class="dashboard-progress-circle" id="minimumProgressCircle" style="background: conic-gradient(#1a237e 0deg, #e5e7eb 0deg);">
+                                    <div class="dashboard-progress-circle-inner">
+                                        <span class="text-2xl font-bold text-blue-800" id="minimumProgressPercent">0%</span>
+                                        <span class="text-xs text-gray-500" data-i18n="completed">Completed</span>
+                                    </div>
+                                </div>
+                                <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <span class="text-gray-500" data-i18n="totalRequired">Total Required:</span>
+                                        <span class="font-bold block text-lg" id="minimumTotalRequired">0 ton</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500" data-i18n="completedQty">Completed:</span>
+                                        <span class="font-bold block text-lg text-green-600" id="minimumCompleted">0 ton</span>
+                                    </div>
+                                </div>
+                                <div class="mt-3 text-xs text-gray-400" data-i18n="minimumDesc">Includes operations: Minimum, 206, 20.20, 10.10, 83P</div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header bg-green-50">
+                                <h3 class="text-lg font-bold text-green-800">
+                                    <i class="fa-solid fa-spray-can-sparkles mr-2"></i> <span data-i18n="finishingProgress">Finishing Operations Progress</span>
+                                </h3>
+                            </div>
+                            <div class="card-body text-center">
+                                <div class="dashboard-progress-circle" id="finishingProgressCircle" style="background: conic-gradient(#4caf50 0deg, #e5e7eb 0deg);">
+                                    <div class="dashboard-progress-circle-inner">
+                                        <span class="text-2xl font-bold text-green-800" id="finishingProgressPercent">0%</span>
+                                        <span class="text-xs text-gray-500" data-i18n="completed">Completed</span>
+                                    </div>
+                                </div>
+                                <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <span class="text-gray-500" data-i18n="totalRequired">Total Required:</span>
+                                        <span class="font-bold block text-lg" id="finishingTotalRequired">0 ton</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500" data-i18n="completedQty">Completed:</span>
+                                        <span class="font-bold block text-lg text-green-600" id="finishingCompleted">0 ton</span>
+                                    </div>
+                                </div>
+                                <div class="mt-3 text-xs text-gray-400" data-i18n="finishingDesc">Includes operations: Finishing, Galvanizing, etc.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Monthly Production Report (Dashboard) -->
+                    <div class="card mb-8">
+                        <div class="card-header bg-purple-50 flex flex-wrap justify-between items-center gap-2">
+                            <h3 class="text-lg font-bold text-purple-800">
+                                <i class="fa-solid fa-calendar-alt mr-2"></i> 
+                                <span data-i18n="monthlyProductionReport">Monthly Production Report</span>
+                            </h3>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm text-gray-600" id="dashboardMonthlyReportMonth"></span>
+                                <button onclick="switchTab('reports'); selectReportType('monthlyProduction');" class="btn btn-sm btn-outline" title="Open full report">
+                                    <i class="fa-solid fa-up-right-from-square"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="overflow-x-auto">
+                                <table class="compact-table w-full">
+                                    <thead id="dashboardMonthlyReportHead"></thead>
+                                    <tbody id="dashboardMonthlyReportBody">
+                                        <tr><td colspan="11" class="text-center py-4 text-gray-500" data-i18n="noData">No data available</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Project Stage Summary (Dashboard) -->
+                    <div class="card mb-8">
+                        <div class="card-header bg-teal-50 flex flex-wrap justify-between items-center gap-2">
+                            <h3 class="text-lg font-bold text-teal-800"><i class="fa-solid fa-layer-group mr-2"></i> <span data-i18n="stageSummaryReport">Project Stage Summary</span></h3>
+                            <div class="flex items-center gap-2">
+                                <label class="text-sm text-gray-600" data-i18n="selectSalesOrder">Select Sales Order</label>
+                                <select id="dashboardStageSummarySO" class="input-field" style="width:auto;min-width:170px;padding:0.4rem 0.6rem;" onchange="refreshDashboardStageSummaryTable()">
+                                    <option value="" data-i18n="allSalesOrders">All Sales Orders</option>
+                                </select>
+                                <button onclick="openStageSummaryFullReport()" class="btn btn-sm btn-outline" title="Open full report"><i class="fa-solid fa-up-right-from-square"></i></button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="overflow-x-auto">
+                                <table class="compact-table w-full">
+                                    <thead id="dashboardStageSummaryHead"></thead>
+                                    <tbody id="dashboardStageSummaryBody"><tr><td colspan="9" class="text-center py-4 text-gray-500" data-i18n="noData">No data available</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Downtime Breakdown Section -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                        <div class="card">
+                            <div class="card-header bg-red-50">
+                                <h3 class="text-lg font-bold text-red-800">
+                                    <i class="fa-solid fa-chart-pie mr-2"></i> <span data-i18n="downtimeByType">Downtime by Type</span>
+                                </h3>
+                            </div>
+                            <div class="card-body">
+                                <div id="downtimeBreakdownContainer" class="space-y-3"></div>
+                                <div class="mt-4 pt-3 border-t border-gray-200">
+                                    <div class="flex justify-between text-sm font-bold">
+                                        <span data-i18n="totalDowntime">Total Downtime</span>
+                                        <span id="totalDowntimeMinutes">0 min</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header bg-orange-50">
+                                <h3 class="text-lg font-bold text-orange-800">
+                                    <i class="fa-solid fa-list mr-2"></i> <span data-i18n="recentDowntime">Recent Downtime</span>
+                                </h3>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="overflow-x-auto">
+                                    <table class="compact-table w-full">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="date">Date</th>
+                                                <th data-i18n="machine">Machine</th>
+                                                <th data-i18n="downtimeType">Type</th>
+                                                <th data-i18n="durationMinutes">Duration</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="recentDowntimeTableBody">
+                                            <tr><td colspan="4" class="text-center py-4 text-gray-500" data-i18n="noData">No downtime records</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- MODELS SECTION -->
+        <section id="modelsSection" class="space-y-6 hidden">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-database mr-2 text-blue-600"></i> <span data-i18n="modelsDatabase">Models Database</span></h2>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2">
+                            <form id="uploadForm" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="input-group">
+                                        <label class="input-label" data-i18n="towerType">Tower Type</label>
+                                        <select id="towerType" class="input-field" required>
+                                            <option value="" disabled selected data-i18n="selectType">Select type...</option>
+                                            <option value="66KV">66KV</option>
+                                            <option value="220KV">220KV</option>
+                                            <option value="500KV">500KV</option>
+                                            <option value="Telecom">Telecom</option>
+                                        </select>
+                                    </div>
+                                    <div class="input-group">
+                                        <label class="input-label" data-i18n="modelName">Model Name</label>
+                                        <input type="text" id="modelName" class="input-field" required data-i18n-placeholder="modelName" placeholder="Example: T220-A1">
+                                    </div>
+                                </div>
+                                <div class="input-group">
+                                    <label class="input-label" data-i18n="uploadExcelFile">Upload Excel File</label>
+                                    <div class="backup-card p-6 rounded-lg text-center cursor-pointer" onclick="document.getElementById('fileInput').click()">
+                                        <i class="fa-solid fa-cloud-arrow-up text-4xl text-blue-400 mb-3"></i>
+                                        <p class="text-sm font-medium text-gray-700 mb-1" data-i18n="clickToUpload">Click to upload or drag & drop</p>
+                                        <p class="text-xs text-gray-500" data-i18n="fileMustContain">File must contain required columns</p>
+                                        <input type="file" id="fileInput" accept=".xlsx,.xls" class="hidden" onchange="handleFileSelect(event)">
+                                    </div>
+                                    <div id="fileName" class="text-sm text-green-600 mt-2 hidden"></div>
+                                </div>
+                                <button type="button" onclick="processData()" class="btn btn-primary w-full"><i class="fa-solid fa-upload"></i> <span data-i18n="processSaveData">Process & Save Data</span></button>
+                            </form>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="card bg-blue-50 border-blue-200">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-blue-800 mb-2"><i class="fa-solid fa-circle-info mr-2"></i> <span data-i18n="importantInformation">Important Information</span></h3>
+                                    <ul class="text-sm text-blue-700 space-y-2 list-disc pl-4">
+                                        <li data-i18n="excelMustContain">Excel file must contain these columns</li>
+                                        <li data-i18n="itemNameSection">Item Name, Section, Steel Grade</li>
+                                        <li data-i18n="operations5to7">Operations (5 to 7 operations)</li>
+                                        <li data-i18n="operationsProcessed">Operations processed automatically</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-bar mr-2"></i> <span data-i18n="statistics">Statistics</span></h3>
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div class="text-center"><span id="totalModels" class="block text-2xl font-bold text-blue-600">0</span><span class="text-xs text-gray-500" data-i18n="models">Models</span></div>
+                                        <div class="text-center"><span id="totalItems" class="block text-2xl font-bold text-purple-600">0</span><span class="text-xs text-gray-500" data-i18n="items">Items</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-bold"><i class="fa-solid fa-list mr-2 text-blue-600"></i> <span data-i18n="savedModels">Saved Models</span></h3>
+                    <div class="relative"><input type="text" id="searchInput" onkeyup="renderModelsList()" class="input-field w-64" data-i18n-placeholder="searchModel" placeholder="Search model..."><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div>
+                </div>
+                <div class="card-body"><div id="modelsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"><p class="text-center text-gray-500 col-span-2 py-10" data-i18n="noSavedModels">No saved models. Upload your first Excel file.</p></div></div>
+            </div>
+
+            <div id="detailsView" class="card hidden fade-in">
+                <div class="card-header"><div><h3 class="text-xl font-bold"><i class="fa-solid fa-circle-info mr-2 text-blue-600"></i> <span data-i18n="modelDetails">Model Details</span>: <span id="viewTitle"></span></h3><span id="viewType" class="text-sm text-gray-500"></span></div><div class="action-buttons"><button onclick="hideDetails()" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i> <span data-i18n="close">Close</span></button></div></div>
+                <div class="card-body"><div class="table-container"><table class="table report-table"><thead><tr><th>#</th><th data-i18n="itemName">Item Name</th><th data-i18n="section">Section</th><th data-i18n="steelGrade">Steel Grade</th><th data-i18n="operationSequence">Operation Sequence</th></tr></thead><tbody id="detailsTableBody"></tbody></table></div></div>
+            </div>
+        </section>
+
+        <!-- WORK ORDER SECTION -->
+        <section id="workOrderSection" class="space-y-6 hidden">
+            <div class="card">
+                <div class="card-header"><h2 class="text-xl font-bold"><i class="fa-solid fa-file-circle-plus mr-2 text-green-600"></i> <span data-i18n="createNewWorkOrder">Create New Work Order</span></h2></div>
+                <div class="card-body"><div class="grid grid-cols-1 lg:grid-cols-3 gap-6"><div class="lg:col-span-2"><form id="workOrderForm" class="space-y-4"><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="workOrderName">Work Order Name</label><input type="text" id="workOrderName" class="input-field" required data-i18n-placeholder="workOrderName" placeholder="Example: WO-2024-001"></div><div class="input-group"><label class="input-label" data-i18n="projectName">Project Name</label><input type="text" id="projectName" class="input-field" required data-i18n-placeholder="projectName" placeholder="Example: Northern Network Project"></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="salesOrderNumber">Sales Order Number</label><input type="text" id="salesOrderNumber" class="input-field" required data-i18n-placeholder="salesOrderNumber" placeholder="Example: SO-2024-1001"></div><div class="input-group"><label class="input-label" data-i18n="towerType">Tower Type</label><select id="workOrderTowerType" class="input-field" onchange="populateModelDropdown()" required><option value="" disabled selected data-i18n="selectType">Select type...</option></select></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="modelName">Model</label><select id="workOrderModel" class="input-field" required><option value="" disabled selected data-i18n="selectModel">Select model...</option></select></div><div class="input-group"><label class="input-label" data-i18n="uploadWorkOrderFile">Upload Work Order File</label><div class="backup-card p-4 rounded-lg text-center cursor-pointer" onclick="document.getElementById('workOrderFile').click()"><i class="fa-solid fa-cloud-arrow-up text-3xl text-green-400 mb-2"></i><p class="text-sm font-medium text-gray-700" data-i18n="clickToUpload">Click to upload or drag & drop</p><input type="file" id="workOrderFile" accept=".xlsx,.xls" class="hidden" onchange="handleWorkOrderFileSelect(event)"></div><div id="workOrderFileName" class="text-sm text-green-600 mt-2 hidden"></div></div></div><button type="button" onclick="processWorkOrder()" class="btn btn-secondary w-full"><i class="fa-solid fa-plus-circle"></i> <span data-i18n="createWorkOrder">Create Work Order</span></button></form></div><div class="space-y-4"><div class="card bg-green-50 border-green-200"><div class="card-body"><h3 class="font-bold text-green-800 mb-2"><i class="fa-solid fa-lightbulb mr-2"></i> <span data-i18n="notes">Notes</span></h3><ul class="text-sm text-green-700 space-y-2 list-disc pl-4"><li data-i18n="selectExistingModel">Select existing model from database</li><li data-i18n="operationsImported">Operations will be imported from selected model</li><li data-i18n="woFileMustContain">Work order file must contain quantities & weights</li><li data-i18n="productionStatusUpdated">Production status updated automatically</li></ul></div></div><div class="card"><div class="card-body"><h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-pie mr-2"></i> <span data-i18n="workOrdersStatistics">Work Orders Statistics</span></h3><div class="grid grid-cols-2 gap-4"><div class="text-center"><span id="totalWorkOrders" class="block text-2xl font-bold text-green-600">0</span><span class="text-xs text-gray-500" data-i18n="workOrders">Work Orders</span></div><div class="text-center"><span id="workOrderItems" class="block text-2xl font-bold text-orange-600">0</span><span class="text-xs text-gray-500" data-i18n="items">Items</span></div></div></div></div></div></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3 class="text-lg font-bold"><i class="fa-solid fa-file-lines mr-2 text-green-600"></i> <span data-i18n="workOrders">Work Orders</span></h3></div>
+                <div class="card-body">
+                    <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
+                        <div class="flex gap-2">
+                            <button onclick="setWorkOrderFilter('inprogress')" id="filterInProgressBtn" class="btn btn-sm btn-primary"><i class="fa-solid fa-spinner"></i> <span data-i18n="inProgressWorkOrders">In Progress Work Orders</span></button>
+                            <button onclick="setWorkOrderFilter('finished')" id="filterFinishedBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-check-circle"></i> <span data-i18n="finishedOrders">Finished Orders</span></button>
+                            <button onclick="setWorkOrderFilter('archived')" id="filterArchivedBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-archive"></i> <span>Archived Work Orders</span></button>
+                        </div>
+                        <div class="relative"><input type="text" id="workOrderSearch" onkeyup="renderWorkOrdersList()" class="input-field w-64" data-i18n-placeholder="searchWorkOrders" placeholder="Search work orders..."><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div>
+                    </div>
+                    <div id="workOrdersContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"><p class="text-center text-gray-500 col-span-2 py-10" data-i18n="noWorkOrders">No work orders. Create your first work order.</p></div>
+                </div>
+            </div>
+            <div id="workOrderDetailsView" class="card hidden fade-in">
+                <div class="card-header"><div><h3 class="text-xl font-bold"><i class="fa-solid fa-file-contract mr-2 text-green-600"></i> <span data-i18n="workOrderDetails">Work Order Details</span>: <span id="workOrderTitle"></span></h3><div class="flex gap-2 mt-2"><span id="workOrderType" class="badge badge-info"></span><span id="workOrderDate" class="text-sm text-gray-500"></span></div></div><div class="action-buttons"><button onclick="exportWorkOrderToExcel()" class="btn btn-secondary btn-sm"><i class="fa-solid fa-file-excel"></i> <span data-i18n="exportExcel">Excel</span></button><button onclick="generateWorkOrderStatusReport()" class="btn btn-warning btn-sm"><i class="fa-solid fa-chart-bar"></i> <span data-i18n="generateReport">Report</span></button><button onclick="hideWorkOrderDetails()" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i> <span data-i18n="close">Close</span></button></div></div>
+                <div class="card-body"><div class="card bg-gray-50 mb-6"><div class="card-body"><div class="grid grid-cols-2 md:grid-cols-4 gap-4"><div><span class="text-sm text-gray-500" data-i18n="project">Project:</span><span id="workOrderProject" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="salesOrder">Sales Order:</span><span id="workOrderSalesNumber" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="creationDate">Creation Date:</span><span id="workOrderCreationDate" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="totalItems">Total Items:</span><span id="workOrderTotalItems" class="font-bold block"></span></div></div></div></div><div class="table-container"><table class="table report-table"><thead><tr><th>#</th><th data-i18n="itemName">Item Name</th><th data-i18n="section">Section</th><th data-i18n="steelGrade">Steel Grade</th><th data-i18n="length">Length</th><th data-i18n="quantity">Quantity</th><th data-i18n="weightPiece">Weight/Piece</th><th data-i18n="totalWeight">Total Weight</th><th data-i18n="operations">Operations</th><th data-i18n="status">Status</th></tr></thead><tbody id="workOrderDetailsTableBody"></tbody></table></div></div>
+            </div>
+        </section>
+
+        <!-- PRODUCTION SECTION -->
+        <section id="productionSection" class="hidden space-y-6">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-industry mr-2 text-purple-600"></i> <span data-i18n="dailyProduction">Daily Production</span></h2>
+                    <div class="flex gap-2"><button onclick="saveProductionPreferences()" class="btn btn-secondary btn-sm"><i class="fa-solid fa-bookmark"></i> <span data-i18n="save">Save</span></button><button onclick="clearProductionForm()" class="btn btn-outline btn-sm"><i class="fa-solid fa-eraser"></i> <span data-i18n="clear">Clear</span></button></div>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2">
+                            <form id="productionForm" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="input-group"><label class="input-label" data-i18n="towerType">Tower Type</label><select id="productionTowerType" class="input-field" onchange="onTowerTypeChange()"><option value="" disabled selected data-i18n="selectType">Select type...</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="modelName">Model</label><select id="productionModel" class="input-field" onchange="onModelChange()"><option value="" disabled selected data-i18n="selectModel">Select model...</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="workOrderName">Work Order Number</label><select id="productionWorkOrder" class="input-field" onchange="onWorkOrderChange()"><option value="" disabled selected data-i18n="selectWorkOrder">Select work order...</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="project">Project Name</label><select id="productionProject" class="input-field" disabled><option value="" disabled selected data-i18n="autoFill">Will be filled automatically...</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="date">Date</label><input type="date" id="productionDate" class="input-field"></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="shift">Shift</label><select id="productionShift" class="input-field" onchange="saveProductionPreferences()"><option value="" disabled selected data-i18n="selectShift">Select shift...</option><option value="First Shift" data-i18n="firstShift">First Shift</option><option value="Second Shift" data-i18n="secondShift">Second Shift</option><option value="Third Shift" data-i18n="thirdShift">Third Shift</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="machineName">Machine Name</label><select id="productionMachine" class="input-field" onchange="onMachineChange()"><option value="" disabled selected data-i18n="selectMachine">Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="operatorName">Operator Name</label><select id="productionOperatorSelect" class="input-field" onchange="saveProductionPreferences()"><option value="" disabled selected data-i18n="selectOperator">Select operator...</option></select><div class="mt-2"><button type="button" onclick="showOperatorsManagement()" class="btn btn-outline btn-sm w-full"><i class="fa-solid fa-users-gear"></i> <span data-i18n="manageOperators">Manage Operators</span></button></div></div>
+                                </div>
+
+                                <!-- Balance Toggle for Finishing -->
+                                <div id="balanceToggleContainer" class="hidden mt-2">
+                                    <div class="input-group bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                        <label class="input-label flex items-center gap-2">
+                                            <i class="fa-solid fa-scale-balanced text-blue-600"></i>
+                                            <span class="font-semibold">Balance Mode</span>
+                                        </label>
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-sm text-gray-600">Off</span>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" id="balanceToggle" class="sr-only peer" onchange="toggleBalanceMode()">
+                                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                                            </label>
+                                            <span class="text-sm text-gray-600">On</span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-2">When ON: shows all unfinished finishing items, auto-completes previous operations with "Balance" operator</p>
+                                    </div>
+                                </div>
+
+                                <div id="availableItemsContainer" class="hidden">
+                                    <div class="input-group"><div class="flex justify-between items-center mb-1"><label class="input-label" data-i18n="selectItemProduction">Select Item for Production</label><span id="remainingQuantityInfo" class="text-xs text-gray-500"></span></div><div class="mb-2"><input type="text" id="itemSearchInput" class="input-field" data-i18n-placeholder="searchItem" placeholder="Search item (e.g. A1)..." onkeyup="filterAvailableItems()"></div><select id="availableItemsSelect" class="input-field" onchange="updateQuantityField()"><option value="" disabled selected data-i18n="selectItem">Select item...</option></select><div id="itemDetails" class="mt-3 p-3 bg-blue-50 rounded-lg hidden"><div class="grid grid-cols-2 gap-3 text-sm"><div><span class="font-bold text-gray-600" data-i18n="section">Section:</span><span id="selectedItemSection" class="ml-2 text-gray-800"></span></div><div><span class="font-bold text-gray-600" data-i18n="operation">Operation:</span><span id="selectedItemOperation" class="ml-2 text-gray-800"></span></div><div><span class="font-bold text-gray-600" data-i18n="totalQty">Total Qty:</span><span id="selectedItemTotal" class="ml-2 text-gray-800"></span></div><div><span class="font-bold text-gray-600" data-i18n="completed">Completed:</span><span id="selectedItemCompleted" class="ml-2 text-gray-800"></span></div><div><span class="font-bold text-gray-600" data-i18n="remaining">Remaining:</span><span id="selectedItemRemaining" class="ml-2 text-gray-800"></span></div><div><span class="font-bold text-gray-600" data-i18n="weightPiece">Weight/Piece:</span><span id="selectedItemWeight" class="ml-2 text-gray-800"></span></div></div></div></div>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="input-group"><label class="input-label" data-i18n="quantityProduced">Quantity Produced</label><input type="number" id="productionQuantity" min="1" value="1" class="input-field" onchange="validateQuantity()"><div id="quantityWarning" class="error-message hidden"></div></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="rejectedQty">Rejected Quantity</label><input type="number" id="productionRejectedQty" min="0" value="0" class="input-field"></div>
+                                </div>
+                                <div class="input-group"><label class="input-label" data-i18n="notesField">Notes</label><textarea id="productionNotes" rows="2" class="input-field" data-i18n-placeholder="notesField" placeholder="Additional notes..."></textarea></div>
+                                <button type="button" onclick="recordProduction()" class="btn btn-primary w-full"><i class="fa-solid fa-floppy-disk"></i> <span data-i18n="recordProduction">Record Production</span></button>
+                            </form>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="card bg-purple-50 border-purple-200"><div class="card-body"><h3 class="font-bold text-purple-800 mb-2"><i class="fa-solid fa-circle-info mr-2"></i> <span data-i18n="notes">Notes</span></h3><ul class="text-sm text-purple-700 space-y-2 list-disc pl-4"><li data-i18n="selectionsSaved">Your selections will be saved automatically for easier entry of subsequent items</li><li data-i18n="selectExistingModel">Select existing model from database</li><li data-i18n="operationsImported">Operations will be imported from selected model</li><li data-i18n="productionStatusUpdated">Production status updated automatically</li><li><strong>Balance Mode:</strong> When ON, unfinished finishing items appear regardless of previous operations. Selecting them auto-completes all previous operations with operator "Balance".</li></ul></div></div>
+                            <div class="card"><div class="card-body"><h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-bar mr-2"></i> <span data-i18n="productionStatistics">Production Statistics</span></h3><div class="grid grid-cols-2 gap-4"><div class="text-center"><span id="totalProductionRecords" class="block text-2xl font-bold text-purple-600">0</span><span class="text-xs text-gray-500" data-i18n="productionRecords">Production Records</span></div><div class="text-center"><span id="totalProducedItems" class="block text-2xl font-bold text-indigo-600">0</span><span class="text-xs text-gray-500" data-i18n="piecesProduced">Pieces Produced</span></div></div></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h2 class="text-xl font-bold"><i class="fa-solid fa-chart-line mr-2 text-purple-600"></i> <span data-i18n="productionRecords">Production Records</span></h2><div class="relative"><input type="text" id="productionSearch" onkeyup="renderProductionList()" class="input-field w-64" data-i18n-placeholder="searchProduction" placeholder="Search production records..."><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div></div>
+                <div class="card-body"><div id="productionContainer" class="space-y-4"><p class="text-center text-gray-500 py-10" data-i18n="noProductionRecords">No production records. Record daily production.</p></div><div id="productionDetailsView" class="hidden fade-in mt-8"><div class="card-header"><div><h3 class="text-xl font-bold"><i class="fa-solid fa-clipboard-check mr-2 text-purple-600"></i> <span data-i18n="productionRecordDetails">Production Record Details</span>: <span id="productionTitle"></span></h3><div class="flex gap-2 mt-2"><span id="productionType" class="badge badge-info"></span><span id="productionShiftBadge" class="badge badge-warning"></span><span id="productionDateBadge" class="badge badge-success"></span></div></div><div class="action-buttons"><button onclick="exportProductionToExcel()" class="btn btn-secondary btn-sm"><i class="fa-solid fa-file-excel"></i> <span data-i18n="exportExcel">Excel</span></button><button onclick="hideProductionDetails()" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i> <span data-i18n="close">Close</span></button></div></div><div class="card-body"><div class="card bg-gray-50 mb-6"><div class="card-body"><div class="grid grid-cols-2 md:grid-cols-5 gap-4"><div><span class="text-sm text-gray-500" data-i18n="project">Project:</span><span id="productionProjectDetail" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="machine">Machine:</span><span id="productionMachineDetail" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="quantityProduced">Quantity Produced:</span><span id="productionQuantityDetail" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="operator">Operator:</span><span id="productionOperatorDetail" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="weightProduced">Weight Produced:</span><span id="productionWeightDetail" class="font-bold block"></span></div></div></div></div><div class="table-container"><table class="table report-table"><thead><tr><th>#</th><th data-i18n="itemName">Item Name</th><th data-i18n="section">Section</th><th data-i18n="operation">Operation</th><th data-i18n="status">Status</th><th data-i18n="quantity">Quantity</th><th data-i18n="weightProduced">Weight Produced</th></tr></thead><tbody id="productionDetailsTableBody"></tbody></table></div></div></div></div>
+            </div>
+        </section>
+
+        <!-- DOWNTIME SECTION -->
+        <section id="downtimeSection" class="hidden space-y-6">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-clock mr-2 text-red-600"></i> <span data-i18n="downtimeRecording">Downtime Recording</span></h2>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2">
+                            <form id="downtimeForm" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="input-group"><label class="input-label" data-i18n="date">Date</label><input type="date" id="downtimeDate" class="input-field" required></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="shift">Shift</label><select id="downtimeShift" class="input-field" onchange="calculateDowntimeDuration()"><option value="" disabled selected data-i18n="selectShift">Select shift...</option><option value="First Shift" data-i18n="firstShift">First Shift</option><option value="Second Shift" data-i18n="secondShift">Second Shift</option><option value="Third Shift" data-i18n="thirdShift">Third Shift</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="startTime">Start Time</label><input type="time" id="downtimeStartTime" class="input-field" onchange="calculateDowntimeDuration()"></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="endTime">End Time</label><input type="time" id="downtimeEndTime" class="input-field" onchange="calculateDowntimeDuration()"></div>
+                                </div>
+                                <div class="input-group"><label class="input-label" data-i18n="machineName">Machine</label><select id="downtimeMachine" class="input-field" required><option value="" disabled selected data-i18n="selectMachine">Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div>
+                                <div class="input-group"><label class="input-label" data-i18n="downtimeType">Downtime Type</label>
+                                    <select id="downtimeType" class="input-field" required>
+                                        <option value="" disabled selected data-i18n="selectDowntimeType">Select type...</option>
+                                        <option value="Maintenance" data-i18n="maintenance">Maintenance</option>
+                                        <option value="Planning Load" data-i18n="planningLoad">Planning Load</option>
+                                        <option value="Material Issue" data-i18n="materialIssue">Material Issue</option>
+                                        <option value="Labor Shortage" data-i18n="laborShortage">Labor Shortage</option>
+                                        <option value="Quality" data-i18n="quality">Quality</option>
+                                    </select>
+                                </div>
+                                <div class="input-group"><label class="input-label" data-i18n="description">Description</label><textarea id="downtimeDescription" rows="2" class="input-field" data-i18n-placeholder="description" placeholder="Enter details..." required></textarea></div>
+                                <div class="input-group"><label class="input-label" data-i18n="durationMinutes">Calculated Duration (minutes)</label><input type="number" id="downtimeDuration" class="input-field" readonly placeholder="Auto-calculated"></div>
+                                <button type="button" onclick="recordDowntime()" class="btn btn-danger w-full"><i class="fa-solid fa-clock"></i> <span data-i18n="recordDowntime">Record Downtime</span></button>
+                            </form>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="card bg-red-50 border-red-200">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-red-800 mb-2"><i class="fa-solid fa-circle-info mr-2"></i> <span data-i18n="breakTimes">Break Times</span></h3>
+                                    <ul class="text-sm text-red-700 space-y-1 list-disc pl-4">
+                                        <li>First Shift: 12:00 - 12:30</li>
+                                        <li>Second Shift: 8:00 - 8:30</li>
+                                        <li>Third Shift: 4:00 - 4:30</li>
+                                        <li data-i18n="breakExclusion">Duration excludes break time automatically.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-bar mr-2"></i> <span data-i18n="downtimeStatistics">Downtime Statistics</span></h3>
+                                    <div class="text-center"><span id="totalDowntimeRecords" class="block text-2xl font-bold text-red-600">0</span><span class="text-xs text-gray-500" data-i18n="records">Records</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-bold"><i class="fa-solid fa-list mr-2 text-red-600"></i> <span data-i18n="downtimeRecords">Downtime Records</span></h3>
+                    <div class="relative"><input type="text" id="downtimeSearch" onkeyup="renderDowntimeList()" class="input-field w-64" data-i18n-placeholder="searchDowntime" placeholder="Search downtime records..."><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div>
+                </div>
+                <div class="card-body"><div id="downtimeContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div></div>
+            </div>
+        </section>
+
+        <!-- NCR SECTION -->
+        <section id="ncrSection" class="hidden space-y-6">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-clipboard-list mr-2 text-orange-600"></i> <span data-i18n="ncrTitle">Non-Conformance</span></h2>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2">
+                            <form id="ncrForm" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="input-group"><label class="input-label" data-i18n="date">Date</label><input type="date" id="ncrDate" class="input-field" required></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="shift">Shift</label><select id="ncrShift" class="input-field" required><option value="" disabled selected data-i18n="selectShift">Select shift...</option><option value="First Shift" data-i18n="firstShift">First Shift</option><option value="Second Shift" data-i18n="secondShift">Second Shift</option><option value="Third Shift" data-i18n="thirdShift">Third Shift</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="machineName">Machine</label><select id="ncrMachine" class="input-field" required><option value="" disabled selected data-i18n="selectMachine">Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="selectWorkOrder">Work Order</label><select id="ncrWorkOrder" class="input-field" onchange="populateNCRItems()" required><option value="" disabled selected data-i18n="selectWorkOrder">Select work order...</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="selectItem">Item</label><select id="ncrItem" class="input-field" required><option value="" disabled selected data-i18n="selectItem">Select item...</option></select></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="rejectedQty">Rejected Quantity</label><input type="number" id="ncrRejectedQty" min="1" class="input-field" required></div>
+                                    <div class="input-group"><label class="input-label" data-i18n="ncrType">NCR Type</label><select id="ncrType" class="input-field" required><option value="" disabled selected data-i18n="selectType">Select type...</option><option value="Scrap" data-i18n="scrap">Scrap</option><option value="Accept as it is" data-i18n="acceptAsIs">Accept as it is</option><option value="Repair" data-i18n="repair">Repair</option></select></div>
+                                </div>
+                                <div class="input-group"><label class="input-label" data-i18n="ncrComment">Comment</label><textarea id="ncrComment" rows="2" class="input-field" data-i18n-placeholder="ncrComment" placeholder="Describe the issue..."></textarea></div>
+                                <button type="button" onclick="recordNCR()" class="btn btn-warning w-full"><i class="fa-solid fa-file-circle-exclamation"></i> <span data-i18n="recordNCR">Record NCR</span></button>
+                            </form>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="card bg-orange-50 border-orange-200">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-orange-800 mb-2"><i class="fa-solid fa-circle-info mr-2"></i> <span data-i18n="ncrInformation">NCR Information</span></h3>
+                                    <ul class="text-sm text-orange-700 space-y-2 list-disc pl-4">
+                                        <li data-i18n="ncrInfo1">Records non-conforming items (Scrap, Accept, Repair)</li>
+                                        <li data-i18n="ncrInfo2">Affects OEE & TEEP Quality factor calculation</li>
+                                        <li data-i18n="ncrInfo3">Helps track quality issues by machine and item</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-bar mr-2"></i> <span data-i18n="ncrStatistics">NCR Statistics</span></h3>
+                                    <div class="text-center"><span id="totalNCRRecords" class="block text-2xl font-bold text-orange-600">0</span><span class="text-xs text-gray-500" data-i18n="ncrRecords">NCR Records</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-bold"><i class="fa-solid fa-list mr-2 text-orange-600"></i> <span data-i18n="ncrRecords">NCR Records</span></h3>
+                    <div class="relative"><input type="text" id="ncrSearch" onkeyup="renderNCRList()" class="input-field w-64" data-i18n-placeholder="searchNCR" placeholder="Search NCR records..."><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div>
+                </div>
+                <div class="card-body"><div id="ncrContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div></div>
+            </div>
+        </section>
+
+        <!-- HR SECTION -->
+        <section id="hrSection" class="hidden space-y-6">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-users mr-2 text-indigo-600"></i> Workforce Management (HR)</h2>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2">
+                            <form id="employeeForm" class="space-y-4" onsubmit="event.preventDefault(); saveEmployee();">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="input-group"><label class="input-label">Employee Name *</label><input type="text" id="empName" class="input-field" required placeholder="Full name"></div>
+                                    <div class="input-group"><label class="input-label">Employee ID *</label><input type="text" id="empId" class="input-field" required placeholder="EMP-001"></div>
+                                    <div class="input-group"><label class="input-label">Department</label><select id="empDept" class="input-field"><option value="Production">Production</option><option value="Maintenance">Maintenance</option><option value="Quality">Quality</option><option value="Logistics">Logistics</option><option value="Administration">Administration</option></select></div>
+                                    <div class="input-group"><label class="input-label">Position</label><select id="empPosition" class="input-field"><option value="Operator">Operator</option><option value="Supervisor">Supervisor</option><option value="Technician">Technician</option><option value="Manager">Manager</option><option value="Worker">Worker</option></select></div>
+                                    <div class="input-group"><label class="input-label">Shift</label><select id="empShift" class="input-field"><option value="First Shift">First Shift</option><option value="Second Shift">Second Shift</option><option value="Third Shift">Third Shift</option><option value="Rotating">Rotating</option></select></div>
+                                    <div class="input-group"><label class="input-label">Phone</label><input type="text" id="empPhone" class="input-field" placeholder="Phone number"></div>
+                                    <div class="input-group"><label class="input-label">Hire Date</label><input type="date" id="empHireDate" class="input-field"></div>
+                                    <div class="input-group"><label class="input-label">Status</label><select id="empStatus" class="input-field"><option value="Active">Active</option><option value="Inactive">Inactive</option><option value="On Leave">On Leave</option></select></div>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Save Employee</button>
+                                    <button type="button" onclick="resetEmployeeForm()" class="btn btn-outline"><i class="fa-solid fa-eraser"></i> Clear</button>
+                                </div>
+                                <input type="hidden" id="editEmpId" value="">
+                            </form>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="card bg-indigo-50 border-indigo-200">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-indigo-800 mb-2"><i class="fa-solid fa-chart-simple mr-2"></i> Workforce Stats</h3>
+                                    <div class="grid grid-cols-2 gap-4 text-center">
+                                        <div><span id="totalEmployees" class="block text-2xl font-bold text-indigo-600">0</span><span class="text-xs">Total Employees</span></div>
+                                        <div><span id="activeEmployees" class="block text-2xl font-bold text-green-600">0</span><span class="text-xs">Active</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-body">
+                                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-circle-info mr-2"></i> HR Notes</h3>
+                                    <ul class="text-xs text-gray-600 space-y-1 list-disc pl-4">
+                                        <li>Employees listed here are available for operator selection in production.</li>
+                                        <li>Add, edit, or deactivate employees as needed.</li>
+                                        <li>Employee ID must be unique.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-bold"><i class="fa-solid fa-list mr-2 text-indigo-600"></i> Employee List</h3>
+                    <div class="relative"><input type="text" id="employeeSearch" onkeyup="renderEmployeesList()" class="input-field w-64" placeholder="Search by name or ID..."><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div>
+                </div>
+                <div class="card-body"><div id="employeesContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"><p class="text-center text-gray-500 col-span-2 py-10">No employees. Add your first employee.</p></div></div>
+            </div>
+        </section>
+
+        <!-- REPORTS SECTION -->
+        <section id="reportsSection" class="hidden space-y-6">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-chart-column mr-2 text-teal-600"></i> <span data-i18n="reports">Reports</span></h2>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="reportCardsContainer">
+                        <!-- Project Stage Summary - Teal -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-teal-500" onclick="selectReportType('projectStageSummary')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-layer-group text-2xl text-teal-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="stageSummaryReport">Project Stage Summary</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="stageSummaryDesc">Completed vs in-progress per manufacturing stage, with totals</p>
+                            </div>
+                        </div>
+
+                        <!-- WIP After Minimum - Amber -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-amber-500" onclick="selectReportType('minimumStoppage')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-circle-stop text-2xl text-amber-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="minStoppageReport">WIP After Minimum</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="minStoppageDesc">Items that completed Minimum and are still WIP in later stages</p>
+                            </div>
+                        </div>
+
+                        <!-- Monthly Production Report - Purple -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-purple-500" onclick="selectReportType('monthlyProduction')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-calendar-alt text-2xl text-purple-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="monthlyProductionReport">Monthly Production Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="monthlyReportDesc">Daily Minimum & Finish vs target (22 tons), with cumulative efficiency</p>
+                            </div>
+                        </div>
+
+                        <!-- Items Status Report - Blue -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-blue-500" onclick="selectReportType('itemsStatus')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-clipboard-list text-2xl text-blue-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="itemsStatusReport">Items Status Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="detailedStatus">Detailed status of items in a work order</p>
+                            </div>
+                        </div>
+
+                        <!-- Detailed Item Report - Pink -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-pink-500" onclick="selectReportType('detailedItem')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-rectangle-list text-2xl text-pink-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="detailedItemReport">Detailed Item Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="detailedProduction">Production history for a specific item</p>
+                            </div>
+                        </div>
+
+                        <!-- Daily Production Report - Green -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-green-500" onclick="selectReportType('dailyProduction')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-calendar-day text-2xl text-green-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="dailyProductionReport">Daily Production Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="dailyProductionDesc">Production records by date/shift/machine</p>
+                            </div>
+                        </div>
+
+                        <!-- Operation Status Report - Orange -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-orange-500" onclick="selectReportType('operationStatus')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-microchip text-2xl text-orange-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="operationStatusReport">Operation Status Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="operationStatusDesc">Status of specific operations across work orders</p>
+                            </div>
+                        </div>
+
+                        <!-- Shortage Report - Red -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-red-500" onclick="selectReportType('shortage')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-triangle-exclamation text-2xl text-red-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="shortageReport">Shortage Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="shortageDesc">Items with remaining quantity > 0</p>
+                            </div>
+                        </div>
+
+                        <!-- Downtime Report - Yellow -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-yellow-500" onclick="selectReportType('downtime')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-stopwatch text-2xl text-yellow-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="downtimeReport">Downtime Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="downtimeReportDesc">Downtime analysis by date and type</p>
+                            </div>
+                        </div>
+
+                        <!-- NCR Report - Rose -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-rose-500" onclick="selectReportType('ncrReport')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-clipboard-list text-2xl text-rose-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="ncrReport">NCR Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="ncrReportDesc">Non-conformance records by date/machine/type</p>
+                            </div>
+                        </div>
+
+                        <!-- OEE Report - Indigo -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-indigo-500" onclick="selectReportType('oeeReport')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-chart-line text-2xl text-indigo-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="oeeReport">OEE Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="oeeReportDesc">Overall Equipment Effectiveness over period</p>
+                            </div>
+                        </div>
+
+                        <!-- TEEP Report - Cyan -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-cyan-500" onclick="selectReportType('teepReport')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-chart-simple text-2xl text-cyan-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="teepReport">TEEP Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="teepReportDesc">Total Effective Equipment Performance</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="reportFormsContainer" class="mt-8 hidden"></div>
+                    <div id="reportResults" class="hidden mt-8">
+                        <div class="card">
+                            <div class="report-header bg-gradient-to-r from-indigo-800 to-blue-800 text-white p-4 rounded-t-lg flex justify-between items-center">
+                                <h3 id="reportTitle" class="text-xl font-bold" data-i18n="report">Report</h3>
+                                <div>
+                                    <button onclick="exportReportToExcel()" class="btn btn-sm bg-white text-indigo-800 mr-2"><i class="fa-solid fa-file-excel"></i> <span data-i18n="exportExcel">Excel</span></button>
+                                    <button onclick="exportReportToPdf()" class="btn btn-sm bg-white text-indigo-800 mr-2"><i class="fa-solid fa-file-pdf"></i> <span data-i18n="exportPdf">PDF</span></button>
+                                    <button onclick="printReport()" class="btn btn-sm bg-white text-indigo-800 mr-2"><i class="fa-solid fa-print"></i> <span data-i18n="print">Print</span></button>
+                                    <button onclick="hideReportResults()" class="btn btn-sm bg-white text-indigo-800"><i class="fa-solid fa-times"></i> <span data-i18n="close">Close</span></button>
+                                </div>
+                            </div>
+                            <div class="card-body overflow-x-auto">
+                                <table class="compact-table w-full">
+                                    <thead id="reportTableHeader"></thead>
+                                    <tbody id="reportTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- FOOTER                                                        -->
+    <!-- ============================================================ -->
+    <footer class="app-footer no-print" id="mainFooter">
+        <p>@2026 Created by Walid Ahmed Yosuf</p>
+        <p class="creator-credit">Tower Manufacturing Management System v2.2.0 with OEE, TEEP, NCR, HR & Balance Mode</p>
+    </footer>
+
+    <!-- ============================================================ -->
+    <!-- TOAST CONTAINER                                               -->
+    <!-- ============================================================ -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- ============================================================ -->
+    <!-- MODALS                                                        -->
+    <!-- ============================================================ -->
+
+    <!-- Backup Modal -->
+    <div class="modal" id="backupModal">
+        <div class="modal-content">
+            <div class="modal-header"><h3 class="text-lg font-bold"><i class="fa-solid fa-database mr-2"></i> <span data-i18n="backupRestore">Backup Management</span></h3><button onclick="hideModal('backupModal')" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i></button></div>
+            <div class="modal-body"><div class="space-y-4"><div class="input-group"><label class="input-label" data-i18n="createBackup">Create Backup</label><p class="text-sm text-gray-600 mb-3" data-i18n="saveAllData">Save all system data to a JSON file</p><button onclick="createBackup()" class="btn btn-primary w-full"><i class="fa-solid fa-download"></i> <span data-i18n="createBackup">Create Backup</span></button></div><div class="input-group"><label class="input-label" data-i18n="restoreBackup">Restore Backup</label><p class="text-sm text-gray-600 mb-3" data-i18n="restoreData">Restore data from a backup file</p><input type="file" id="backupFile" accept=".json" class="input-field" onchange="handleBackupFileChange()"><button onclick="restoreFromBackup()" class="btn btn-secondary w-full mt-2" id="restoreBackupBtn" disabled><i class="fa-solid fa-upload"></i> <span data-i18n="restoreBackup">Restore Backup</span></button></div><div class="input-group"><label class="input-label" data-i18n="backupSchedule">Backup Schedule</label><p class="text-sm text-gray-600 mb-3" data-i18n="setAutomaticBackup">Set automatic backup timing</p><select id="backupSchedule" class="input-field"><option value="daily" data-i18n="daily">Daily</option><option value="weekly" data-i18n="weekly">Weekly</option><option value="monthly" data-i18n="monthly">Monthly</option><option value="none" data-i18n="none">None</option></select><button onclick="setBackupSchedule()" class="btn btn-outline w-full mt-2"><i class="fa-solid fa-calendar-check"></i> <span data-i18n="saveSchedule">Save Schedule</span></button></div></div></div>
+            <div class="modal-footer"><button onclick="hideModal('backupModal')" class="btn btn-outline"><span data-i18n="close">Close</span></button></div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div class="modal" id="confirmationModal">
+        <div class="modal-content">
+            <div class="modal-header"><h3 class="text-lg font-bold" id="confirmationTitle"></h3><button onclick="hideModal('confirmationModal')" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i></button></div>
+            <div class="modal-body"><p id="confirmationMessage"></p><div class="confirmation-buttons"><button onclick="confirmAction()" class="btn btn-danger"><span data-i18n="confirm">Confirm</span></button><button onclick="hideModal('confirmationModal')" class="btn btn-outline"><span data-i18n="cancel">Cancel</span></button></div></div>
+        </div>
+    </div>
+
+    <!-- Loading Modal -->
+    <div class="modal" id="loadingModal">
+        <div class="modal-content" style="background: transparent; box-shadow: none;"><div class="text-center"><div class="spinner mx-auto mb-4"></div><p class="text-white font-medium" id="loadingText" data-i18n="processing">Processing...</p></div></div>
+    </div>
+
+    <!-- Settings Modal (مع حاوية إدارة المستخدمين) -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="text-lg font-bold"><i class="fa-solid fa-gear mr-2"></i> <span data-i18n="settings">Settings</span></h3>
+                <button onclick="hideModal('settingsModal')" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="space-y-4">
+                    <button onclick="showBackupModal()" class="btn btn-primary w-full"><span data-i18n="backup">Backup</span></button>
+                    <button onclick="showOperatorsManagement()" class="btn btn-warning w-full"><span data-i18n="manageOperators">Manage Operators</span></button>
+                    <button onclick="showIdealRatesManagement()" class="btn btn-secondary w-full"><span data-i18n="manageIdealRates">Set Machine Ideal Rates (OEE/TEEP)</span></button>
+                    <hr class="border-gray-200">
+                    <!-- Users Management (visible only for admin) -->
+                    <div id="usersManagementContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scroll to Top Button -->
+    <div class="scroll-to-top hidden" id="scrollToTop" onclick="scrollToTop()"><i class="fa-solid fa-arrow-up"></i></div>
+
+    <!-- ============================================================ -->
+    <!-- RENDERER.JS                                                   -->
+    <!-- ============================================================ -->
+    <script src="renderer.js"></script>
+</body>
+</html>

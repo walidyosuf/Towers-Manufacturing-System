@@ -13,6 +13,7 @@
 // تم إضافة: إدارة المستخدمين (إضافة/حذف/تعديل) في Settings (للمدير فقط)
 // تم إصلاح: تحميل usersDB بشكل صحيح باستخدام Array.isArray
 // تم التعديل: المصادقة تعمل محلياً بغض النظر عن الخادم
+// تم إصلاح: إضافة المتغيرات والدوال المفقودة لتعمل جميع التقارير
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -31,6 +32,59 @@ let dataReady = false;
 let pendingSaves = 0;
 const lastSavePayload = {};
 const unconfirmedTypes = new Set();
+
+// ===== NEW: Missing variables and helper functions for reports =====
+function esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+const STATUS = {
+    PENDING: 'Pending',
+    IN_PROGRESS: 'In Progress',
+    COMPLETED: 'Completed',
+    BLOCKED: 'Blocked'
+};
+
+let appConfig = {
+    version: '2.2.1',
+    settings: {},
+    lastBackup: null,
+    backupSchedule: 'none'
+};
+
+let currentWorkOrderFilter = 'inprogress';
+let currentAvailableItems = [];
+let productionPreferences = {};
+let currentWorkOrder = null;
+let currentProduction = null;
+let currentExcelData = null;
+let currentWorkOrderData = null;
+let pendingDeleteAction = null;
+let pendingDeleteData = null;
+let allItemsForReport = [];
+let allItemsForReportFiltered = [];
+
+function getMachinesByPhase(phase) {
+    const allMachines = ['206', '20.20', '10.10', 'Cropping', 'Manual Plasma', 'Press', 'Drill', 'Chamfering', 'Shear', '83P', 'CNC Bending', 'Finishing'];
+    if (!phase) return allMachines;
+    const phaseMap = {
+        'minimum': ['206', '20.20', '10.10', '83P'],
+        'crop': ['Cropping', 'Manual Plasma'],
+        'shear': ['Shear'],
+        'bend': ['Press', 'CNC Bending'],
+        'drill': ['Drill'],
+        'chamfer': ['Chamfering'],
+        'finish': ['Finishing']
+    };
+    return phaseMap[phase] || allMachines;
+}
+
+function yieldToUI() {
+    return new Promise(resolve => {
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+    });
+}
 
 // ============= AUTH & PERMISSIONS =============
 const ROLES = {
@@ -54,7 +108,7 @@ const PERMISSIONS = {
         canViewHR: true,
         canViewModels: true,
         canViewSettings: true,
-        canManageUsers: true, // صلاحية إدارة المستخدمين
+        canManageUsers: true,
         canCreateWorkOrder: true,
         canEditWorkOrder: true,
         canDeleteWorkOrder: true,
@@ -236,11 +290,8 @@ let currentUser = null;
 // ============= USERS MANAGEMENT (Local) =============
 async function loadUsers() {
     try {
-        // محاولة تحميل المستخدمين من الخادم (إذا كان متاحاً)
         const data = await loadFromServer('usersDB');
-        // التأكد من أن usersDB هي مصفوفة دائماً
         usersDB = Array.isArray(data) ? data : [];
-        // إذا كانت القائمة فارغة، نضيف المستخدمين الافتراضيين
         if (usersDB.length === 0) {
             usersDB = [
                 { username: 'admin', password: 'admin123', role: 'administrator' },
@@ -250,16 +301,10 @@ async function loadUsers() {
                 { username: 'projects', password: 'projects123', role: 'projects' },
                 { username: 'top', password: 'top123', role: 'top_management' }
             ];
-            // محاولة حفظها على الخادم (إذا كان متاحاً)
-            try {
-                await saveUsersToServer();
-            } catch (e) {
-                // تجاهل خطأ الحفظ على الخادم - نستخدم القائمة المحلية
-            }
+            try { await saveUsersToServer(); } catch (e) { /* ignore */ }
         }
     } catch (error) {
         console.error('Error loading users from server, using default local list:', error);
-        // في حالة فشل تحميل البيانات من الخادم، نستخدم القائمة الافتراضية محلياً
         usersDB = [
             { username: 'admin', password: 'admin123', role: 'administrator' },
             { username: 'planning', password: 'planning123', role: 'planning' },
@@ -281,9 +326,7 @@ function findUser(username) {
 
 function authenticateUser(username, password) {
     const user = findUser(username);
-    if (user && user.password === password) {
-        return user;
-    }
+    if (user && user.password === password) return user;
     return null;
 }
 
@@ -338,50 +381,30 @@ function applyPermissionsToCurrentSection() {
     switch (sectionId) {
         case 'modelsSection':
             const modelsForm = document.querySelector('#modelsSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
-            if (modelsForm) {
-                modelsForm.style.display = hasPermission('canCreateModel') ? '' : 'none';
-            }
+            if (modelsForm) modelsForm.style.display = hasPermission('canCreateModel') ? '' : 'none';
             break;
-
         case 'workOrderSection':
             const woForm = document.querySelector('#workOrderSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
-            if (woForm) {
-                woForm.style.display = hasPermission('canCreateWorkOrder') ? '' : 'none';
-            }
+            if (woForm) woForm.style.display = hasPermission('canCreateWorkOrder') ? '' : 'none';
             break;
-
         case 'productionSection':
             const prodForm = document.querySelector('#productionSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
-            if (prodForm) {
-                prodForm.style.display = hasPermission('canRecordProduction') ? '' : 'none';
-            }
+            if (prodForm) prodForm.style.display = hasPermission('canRecordProduction') ? '' : 'none';
             const manageOpsBtn = document.querySelector('#productionSection button[onclick="showOperatorsManagement()"]');
-            if (manageOpsBtn) {
-                manageOpsBtn.style.display = hasPermission('canManageOperators') ? '' : 'none';
-            }
+            if (manageOpsBtn) manageOpsBtn.style.display = hasPermission('canManageOperators') ? '' : 'none';
             break;
-
         case 'downtimeSection':
             const dtForm = document.querySelector('#downtimeSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
-            if (dtForm) {
-                dtForm.style.display = hasPermission('canRecordDowntime') ? '' : 'none';
-            }
+            if (dtForm) dtForm.style.display = hasPermission('canRecordDowntime') ? '' : 'none';
             break;
-
         case 'ncrSection':
             const ncrForm = document.querySelector('#ncrSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
-            if (ncrForm) {
-                ncrForm.style.display = hasPermission('canRecordNCR') ? '' : 'none';
-            }
+            if (ncrForm) ncrForm.style.display = hasPermission('canRecordNCR') ? '' : 'none';
             break;
-
         case 'hrSection':
             const hrForm = document.querySelector('#hrSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
-            if (hrForm) {
-                hrForm.style.display = hasPermission('canManageEmployees') ? '' : 'none';
-            }
+            if (hrForm) hrForm.style.display = hasPermission('canManageEmployees') ? '' : 'none';
             break;
-
         case 'reportsSection':
             const exportBtns = document.querySelector('#reportResults .report-header .flex');
             if (exportBtns) {
@@ -391,9 +414,7 @@ function applyPermissionsToCurrentSection() {
                 });
             }
             break;
-
-        default:
-            break;
+        default: break;
     }
 }
 
@@ -413,7 +434,6 @@ function applyPermissions() {
     document.querySelector('.app-footer').style.display = 'block';
     document.getElementById('loginScreen').style.display = 'none';
 
-    // ====== إخفاء الأزرار الجانبية بناءً على الصلاحيات (باستخدام data-tab) ======
     document.querySelectorAll('.sidebar-tab').forEach(tab => {
         const tabId = tab.getAttribute('data-tab');
         if (!tabId) return;
@@ -433,7 +453,6 @@ function applyPermissions() {
         tab.style.display = visible ? '' : 'none';
     });
 
-    // ====== تعطيل الحقول والأزرار حسب الصلاحيات ======
     const recordProdBtn = document.querySelector('#productionForm button[onclick="recordProduction()"]');
     if (recordProdBtn) {
         recordProdBtn.disabled = !hasPermission('canRecordProduction');
@@ -458,7 +477,6 @@ function applyPermissions() {
         recordNcrBtn.style.opacity = hasPermission('canRecordNCR') ? 1 : 0.5;
     }
 
-    // تطبيق الصلاحيات على القسم الحالي
     applyPermissionsToCurrentSection();
 }
 
@@ -492,9 +510,7 @@ function handleLogin() {
     const success = login(username, password);
     if (success) {
         if (!dataReady) {
-            loadData().then(() => {
-                renderAll();
-            });
+            loadData().then(() => renderAll());
         } else {
             renderAll();
         }
@@ -552,9 +568,7 @@ function flushUnsavedOnClose() {
         try {
             const blob = new Blob([payload], { type: 'application/json' });
             navigator.sendBeacon(`${SERVER_URL}/api/data/${dataType}`, blob);
-        } catch (e) {
-            console.error('flushUnsavedOnClose failed for', dataType, e);
-        }
+        } catch (e) { console.error('flushUnsavedOnClose failed for', dataType, e); }
     });
     try {
         const pendingProd = productionDB.filter(r => !syncedRecordIds.has(r.id));
@@ -562,9 +576,7 @@ function flushUnsavedOnClose() {
             const blob = new Blob([JSON.stringify(pendingProd)], { type: 'application/json' });
             navigator.sendBeacon(`${SERVER_URL}/api/production`, blob);
         }
-    } catch (e) {
-        console.error('flushUnsavedOnClose (production) failed', e);
-    }
+    } catch (e) { console.error('flushUnsavedOnClose (production) failed', e); }
 }
 
 function setupSaveOnClose() {
@@ -679,7 +691,6 @@ async function loadData() {
         machineIdealRates = await loadFromServer('machineIdealRates');
         ncrDB = await loadFromServer('ncrDB');
         employeesDB = await loadFromServer('employeesDB');
-        // تحميل المستخدمين (يعمل محلياً في حالة فشل الخادم)
         await loadUsers();
         dataReady = true;
     } catch (error) {
@@ -719,11 +730,9 @@ function showSettingsPanel() {
         return;
     }
     showModal('settingsModal');
-    // إذا كان المستخدم مديراً، نعرض قسم إدارة المستخدمين
     if (hasPermission('canManageUsers')) {
         renderUsersManagement();
     } else {
-        // إخفاء قسم إدارة المستخدمين
         const usersSection = document.getElementById('usersManagementContainer');
         if (usersSection) usersSection.innerHTML = '';
     }
@@ -763,15 +772,9 @@ function renderUsersManagement() {
             <div class="table-container">
                 <table class="table report-table">
                     <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>اسم المستخدم</th>
-                            <th>الدور</th>
-                            <th>إجراءات</th>
-                        </tr>
+                        <tr><th>#</th><th>اسم المستخدم</th><th>الدور</th><th>إجراءات</th></tr>
                     </thead>
-                    <tbody id="usersTableBody">
-                    </tbody>
+                    <tbody id="usersTableBody"></tbody>
                 </table>
             </div>
         </div>
@@ -1521,7 +1524,6 @@ function applyLoginTranslations() {
         const key = el.getAttribute('data-i18n-placeholder');
         if (t[key]) el.placeholder = t[key];
     });
-    // تحديث أزرار اللغة في شاشة الدخول
     const btnEn = document.getElementById('loginBtnEn');
     const btnAr = document.getElementById('loginBtnAr');
     if (btnEn) btnEn.className = btnEn.className.replace('active', '').trim();
@@ -4153,7 +4155,6 @@ function generateDailyProductionReport() {
                 if (machine && r.machine !== machine) return false;
                 if (woIdInt && r.workOrderId !== woIdInt) return false;
                 if (phase && getOperationPhase(r.operation) !== phase) return false;
-                // Filter by recordedBy if user is PRODUCTION or ADMINISTRATOR
                 const user = getCurrentUser();
                 if (user && (user.role === ROLES.PRODUCTION || user.role === ROLES.ADMINISTRATOR)) {
                     if (r.recordedBy && r.recordedBy !== user.username) return false;
@@ -4950,19 +4951,16 @@ function switchTab(tab) {
         return;
     }
 
-    // حالة خاصة: الإعدادات (نافذة منبثقة)
     if (tab === 'settings') {
         showSettingsPanel();
         return;
     }
 
-    // باقي الأقسام
     document.querySelectorAll('section[id$="Section"]').forEach(s => s.classList.add('hidden'));
     document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
     document.getElementById(`${tab}Section`).classList.remove('hidden');
     document.querySelector(`.sidebar-tab[data-tab="${tab}"]`).classList.add('active');
 
-    // إعدادات خاصة بكل تبويب
     if (tab === 'workOrder') populateTowerTypeDropdown();
     else if (tab === 'production') { populateProductionTowerTypeDropdown(); loadProductionPreferences(); }
     else if (tab === 'reports') { /* handled by card clicks */ }

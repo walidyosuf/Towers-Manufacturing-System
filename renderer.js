@@ -1,19 +1,8 @@
 // renderer.js - Tower Manufacturing Management System v2.2.1
-// تم التعديل: نظام صلاحيات متكامل (RBAC) مع تسجيل دخول محلي (بدون خادم)
-// تم التعديل: إدارة المستخدمين (Users) مع التحقق من اسم المستخدم وكلمة المرور
-// تم التعديل: صلاحيات العرض حسب الطلب
-// - Administrator: كل شيء + Settings + إدارة المستخدمين
-// - باقي الأدوار: لا يظهر Settings
-// - الإنتاج: يظهر كل شيء عدا Settings (مع صلاحيات كاملة)
-// - التخطيط: Dashboard + Reports فقط
-// - المشروعات: Dashboard + Reports فقط
-// - الجودة: Dashboard + Reports + NCR
-// - الإدارة العليا: Dashboard + Reports فقط
-// تم إضافة: شاشة دخول ثنائية اللغة (العربية/الإنجليزية) مع الإنجليزية كلغة افتراضية
-// تم إضافة: إدارة المستخدمين (إضافة/حذف/تعديل) في Settings (للمدير فقط)
-// تم إصلاح: تحميل usersDB بشكل صحيح باستخدام Array.isArray
-// تم التعديل: المصادقة تعمل محلياً بغض النظر عن الخادم
-// تم إصلاح: إضافة المتغيرات والدوال المفقودة لتعمل جميع التقارير
+// تم التعديل: إظهار الأوامر المؤرشفة في Finished Work Orders
+// تم التعديل: حساب الوزن من الأوامر المؤرشفة في Dashboard
+// تم التعديل: إنشاء سجلات إنتاج للأوامر المؤرشفة تلقائياً
+// تم التعديل: إدراج الأوامر المؤرشفة في جميع التقارير
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -25,7 +14,7 @@ let downtimeDB = [];
 let machineIdealRates = {};
 let ncrDB = [];
 let employeesDB = [];
-let usersDB = []; // تخزين المستخدمين: { username, password, role }
+let usersDB = [];
 let balanceMode = false;
 let syncedRecordIds = new Set();
 let dataReady = false;
@@ -33,7 +22,7 @@ let pendingSaves = 0;
 const lastSavePayload = {};
 const unconfirmedTypes = new Set();
 
-// ===== NEW: Missing variables and helper functions for reports =====
+// ===== Variables for reports =====
 function esc(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -97,7 +86,6 @@ const ROLES = {
 };
 
 const PERMISSIONS = {
-    // Administrator: كل الصلاحيات بما فيها Settings
     [ROLES.ADMINISTRATOR]: {
         canViewDashboard: true,
         canViewReports: true,
@@ -126,9 +114,9 @@ const PERMISSIONS = {
         canManageOperators: true,
         canManageEmployees: true,
         canExportReports: true,
-        canViewAllData: true
+        canViewAllData: true,
+        canMarkAsFinished: true
     },
-    // الإدارة العليا: فقط Dashboard و Reports
     [ROLES.TOP_MANAGEMENT]: {
         canViewDashboard: true,
         canViewReports: true,
@@ -157,9 +145,9 @@ const PERMISSIONS = {
         canManageOperators: false,
         canManageEmployees: false,
         canExportReports: true,
-        canViewAllData: true
+        canViewAllData: true,
+        canMarkAsFinished: false
     },
-    // التخطيط: فقط Dashboard و Reports
     [ROLES.PLANNING]: {
         canViewDashboard: true,
         canViewReports: true,
@@ -188,9 +176,9 @@ const PERMISSIONS = {
         canManageOperators: false,
         canManageEmployees: false,
         canExportReports: true,
-        canViewAllData: true
+        canViewAllData: true,
+        canMarkAsFinished: false
     },
-    // الإنتاج: يظهر كل شيء عدا Settings (مع صلاحيات كاملة)
     [ROLES.PRODUCTION]: {
         canViewDashboard: true,
         canViewReports: true,
@@ -219,9 +207,9 @@ const PERMISSIONS = {
         canManageOperators: true,
         canManageEmployees: true,
         canExportReports: true,
-        canViewAllData: true
+        canViewAllData: true,
+        canMarkAsFinished: false
     },
-    // الجودة: Dashboard + Reports + NCR (مع صلاحيات NCR الأصلية)
     [ROLES.QC]: {
         canViewDashboard: true,
         canViewReports: true,
@@ -250,9 +238,9 @@ const PERMISSIONS = {
         canManageOperators: false,
         canManageEmployees: false,
         canExportReports: true,
-        canViewAllData: false
+        canViewAllData: false,
+        canMarkAsFinished: false
     },
-    // المشروعات: فقط Dashboard و Reports
     [ROLES.PROJECTS]: {
         canViewDashboard: true,
         canViewReports: true,
@@ -281,13 +269,14 @@ const PERMISSIONS = {
         canManageOperators: false,
         canManageEmployees: false,
         canExportReports: true,
-        canViewAllData: true
+        canViewAllData: true,
+        canMarkAsFinished: false
     }
 };
 
 let currentUser = null;
 
-// ============= USERS MANAGEMENT (Local) =============
+// ============= USERS MANAGEMENT =============
 async function loadUsers() {
     try {
         const data = await loadFromServer('usersDB');
@@ -372,7 +361,7 @@ function hasPermission(permission) {
     return perms && perms[permission] === true;
 }
 
-// ============= NEW: Apply permissions to current section =============
+// ============= Apply Permissions =============
 function applyPermissionsToCurrentSection() {
     const visibleSection = document.querySelector('section:not(.hidden)');
     if (!visibleSection) return;
@@ -675,11 +664,119 @@ async function replaceAllProductionRecordsOnServer() {
     }
 }
 
+// ====== NEW: Create production records for archived orders ======
+async function createProductionRecordsForArchivedOrders() {
+    let createdCount = 0;
+    
+    workOrdersDB.forEach(wo => {
+        if (wo.archived === true) {
+            // التحقق من وجود سجلات إنتاج لهذا الأمر
+            const existingProd = productionDB.some(r => r.workOrderId === wo.id);
+            if (!existingProd) {
+                // إنشاء سجلات إنتاج لكل بند في الأمر
+                wo.items.forEach(item => {
+                    const completedQty = item.completedQuantity || item.quantity || 0;
+                    const weightPerPiece = item.weightPerPiece || 0;
+                    const totalWeight = completedQty * weightPerPiece;
+                    
+                    if (completedQty > 0 && weightPerPiece > 0) {
+                        const prodRec = {
+                            id: Date.now() + Math.random(),
+                            workOrderId: wo.id,
+                            workOrderName: wo.workOrderName,
+                            projectName: wo.projectName,
+                            towerType: wo.type,
+                            model: wo.model,
+                            shift: 'Finished',
+                            machine: 'System',
+                            operator: 'System',
+                            date: wo.date || new Date().toISOString().split('T')[0],
+                            itemName: item.itemName,
+                            itemSection: item.section,
+                            operation: 'Finished',
+                            quantity: completedQty,
+                            rejectedQty: 0,
+                            producedWeight: totalWeight,
+                            weightPerPiece: weightPerPiece,
+                            totalItemWeight: item.totalWeight || totalWeight,
+                            notes: 'Auto-generated from archived work order',
+                            timestamp: Date.now(),
+                            recordedBy: 'system'
+                        };
+                        productionDB.push(prodRec);
+                        createdCount++;
+                    }
+                });
+            }
+        }
+    });
+    
+    if (createdCount > 0) {
+        await flushNewProductionRecords();
+        showToast(`✅ تم إنشاء ${createdCount} سجل إنتاج للأوامر المؤرشفة`, 'success');
+    }
+    return createdCount;
+}
+
+// ====== NEW: Convert archived work orders to finished ======
+async function convertArchivedToFinished() {
+    if (!hasPermission('canMarkAsFinished')) {
+        showToast('❌ غير مسموح لك بنقل الأوامر المؤرشفة. هذه الصلاحية للمدير فقط.', 'error');
+        return;
+    }
+    
+    let count = 0;
+    workOrdersDB.forEach(wo => {
+        if (wo.archived === true) {
+            count++;
+        }
+    });
+    
+    if (count === 0) {
+        showToast('لا توجد أوامر عمل في الأرشيف', 'info');
+        return;
+    }
+    
+    if (confirm(`هل أنت متأكد من نقل ${count} أمر عمل من Archived إلى Finished Work Orders؟\nسيتم أيضاً إنشاء سجلات إنتاج للأوامر لعرض الوزن في Dashboard.`)) {
+        await saveToServer('workOrdersDB', workOrdersDB);
+        await createProductionRecordsForArchivedOrders();
+        renderWorkOrdersList();
+        renderDashboard();
+        populateProductionTowerTypeDropdown();
+        populateDailyReportWorkOrders();
+        populateNCRWorkOrders();
+        populateReportDropdowns();
+        populateShortageWorkOrders();
+        populateWorkOrdersForOperation();
+        showToast(`✅ تم نقل ${count} أمر عمل إلى Finished Work Orders`, 'success');
+    }
+}
+
 async function loadData() {
     try {
         db = await loadFromServer('towerDB');
         workOrdersDB = await loadFromServer('workOrdersDB');
         workOrdersDB.forEach(wo => { if (wo.archived === undefined) wo.archived = false; });
+        
+        // ===== نقل الأوامر القديمة من Archived إلى Finished تلقائياً =====
+        let archivedCount = 0;
+        workOrdersDB.forEach(wo => {
+            if (wo.archived === true) {
+                archivedCount++;
+            }
+        });
+        
+        if (archivedCount > 0) {
+            console.log(`🔄 جاري نقل ${archivedCount} أمر عمل من Archived إلى Finished...`);
+            await saveToServer('workOrdersDB', workOrdersDB);
+            console.log(`✅ تم نقل ${archivedCount} أمر عمل من Archived إلى Finished Work Orders`);
+            // إنشاء سجلات إنتاج للأوامر المؤرشفة
+            await createProductionRecordsForArchivedOrders();
+            setTimeout(() => {
+                showToast(`✅ تم نقل ${archivedCount} أمر عمل من Archived إلى Finished Work Orders`, 'success');
+            }, 1000);
+        }
+        
         productionDB = await loadProductionRecords();
         const operatorsData = await loadFromServer('machineOperatorsDB');
         machineOperatorsDB = operatorsData || {};
@@ -869,7 +966,6 @@ const translations = {
         appSubtitle: "66KV - 220KV - 500KV - Telecom ",
         manageOperators: "Manage Operators ",
         backup: "Backup ",
-        clearDatabase: "Clear Database ",
         database: "Database ",
         workOrders: "Work Orders ",
         dailyProduction: "Daily Production ",
@@ -889,9 +985,6 @@ const translations = {
         completedQty: "Completed ",
         minimumDesc: "Includes operations: Minimum, 206, 20.20, 10.10, 83P ",
         finishingDesc: "Includes operations: Finishing, Galvanizing, etc. ",
-        minimumProgressShort: "Min. % ",
-        finishingProgressShort: "Fin. % ",
-        overallStatus: "Overall Status ",
         downtimeByType: "Downtime by Type ",
         totalDowntime: "Total Downtime ",
         recentDowntime: "Recent Downtime ",
@@ -901,9 +994,9 @@ const translations = {
         selectType: "Select type... ",
         modelName: "Model Name ",
         uploadExcelFile: "Upload Excel File ",
-        clickToUpload: "Click to upload or drag  & drop ",
+        clickToUpload: "Click to upload or drag & drop ",
         fileMustContain: "File must contain required columns ",
-        processSaveData: "Process  & Save Data ",
+        processSaveData: "Process & Save Data ",
         importantInformation: "Important Information ",
         excelMustContain: "Excel file must contain these columns ",
         itemNameSection: "Item Name, Section, Steel Grade ",
@@ -927,7 +1020,7 @@ const translations = {
         notes: "Notes ",
         selectExistingModel: "Select existing model from database ",
         operationsImported: "Operations will be imported from selected model ",
-        woFileMustContain: "Work order file must contain quantities  & weights ",
+        woFileMustContain: "Work order file must contain quantities & weights ",
         productionStatusUpdated: "Production status updated automatically ",
         workOrdersStatistics: "Work Orders Statistics ",
         searchWorkOrders: "Search work orders... ",
@@ -1088,7 +1181,7 @@ const translations = {
         searchDowntime: "Search downtime records... ",
         records: "Records ",
         shortageReport: "Shortage Report ",
-        shortageDesc: "Show items with remaining quantity  > 0 ",
+        shortageDesc: "Show items with remaining quantity > 0 ",
         generateShortage: "Generate Shortage Report ",
         remainingQty: "Remaining Qty ",
         downtimeReport: "Downtime Report ",
@@ -1140,7 +1233,7 @@ const translations = {
         areYouSureDeleteEmployee: "Are you sure you want to delete this employee? ",
         balanceComplete: "Complete as Balance ",
         monthlyProductionReport: "Monthly Production Report ",
-        monthlyReportDesc: "Daily Minimum  & Finish vs target (22 tons), with cumulative efficiency ",
+        monthlyReportDesc: "Daily Minimum & Finish vs target (22 tons), with cumulative efficiency ",
         month: "Month ",
         day: "Day ",
         date: "Date ",
@@ -1170,14 +1263,16 @@ const translations = {
         roleQC: "Quality",
         roleProjects: "Projects",
         roleTopManagement: "Top Management",
-        roleAdministrator: "Administrator"
+        roleAdministrator: "Administrator",
+        markAsFinished: "Mark as Finished",
+        markAsFinishedConfirm: "Mark this work order as Finished? (≥90% complete)\nIncomplete items will remain and can be completed later.",
+        minCompletionRequired: "Minimum 90% completion required to mark as finished"
     },
     ar: {
         appTitle: "نظام إدارة تصنيع الأبراج ",
         appSubtitle: "66KV - 220KV - 500KV - الاتصالات ",
         manageOperators: "إدارة العاملين ",
         backup: "نسخ احتياطي ",
-        clearDatabase: "مسح قاعدة البيانات ",
         database: "قاعدة البيانات ",
         workOrders: "أوامر العمل ",
         dailyProduction: "الإنتاج اليومي ",
@@ -1197,9 +1292,6 @@ const translations = {
         completedQty: "المكتمل ",
         minimumDesc: "يشمل عمليات: Minimum, 206, 20.20, 10.10, 83P ",
         finishingDesc: "يشمل عمليات: التشطيب، الجلفنة، إلخ ",
-        minimumProgressShort: "% أولي ",
-        finishingProgressShort: "% تشطيب ",
-        overallStatus: "الحالة العامة ",
         downtimeByType: "التوقفات حسب النوع ",
         totalDowntime: "إجمالي التوقفات ",
         recentDowntime: "أحدث التوقفات ",
@@ -1397,7 +1489,7 @@ const translations = {
         searchDowntime: "بحث في التوقفات... ",
         records: "سجل ",
         shortageReport: "تقرير النواقص ",
-        shortageDesc: "عرض العناصر ذات الكمية المتبقية  > 0 ",
+        shortageDesc: "عرض العناصر ذات الكمية المتبقية > 0 ",
         generateShortage: "إنشاء تقرير النواقص ",
         remainingQty: "الكمية المتبقية ",
         downtimeReport: "تقرير التوقفات ",
@@ -1479,7 +1571,10 @@ const translations = {
         roleQC: "الجودة",
         roleProjects: "المشروعات",
         roleTopManagement: "الإدارة العليا",
-        roleAdministrator: "مدير النظام"
+        roleAdministrator: "مدير النظام",
+        markAsFinished: "إنهاء الأمر",
+        markAsFinishedConfirm: "تأكيد إنهاء أمر العمل؟ (اكتمل ≥90%)\nالبنود غير المكتملة ستبقى ويمكن إكمالها لاحقاً.",
+        minCompletionRequired: "يلزم اكتمال 90% على الأقل لإنهاء الأمر"
     }
 };
 
@@ -1591,10 +1686,13 @@ function getWorkOrderCompletionPercentage(wo) {
 }
 
 // ============= DASHBOARD =============
+// ====== MODIFIED: renderDashboard to include archived orders weight ======
 function renderDashboard() {
     document.getElementById('dashboardTimestamp').textContent = new Date().toLocaleString();
+    
+    // حساب أوامر العمل النشطة والمنتهية (بما فيها المؤرشفة)
     const activeWorkOrders = workOrdersDB.filter(wo => !isWorkOrderCompleted(wo) && !wo.archived).length;
-    const finishedWorkOrders = workOrdersDB.filter(wo => isWorkOrderCompleted(wo) && !wo.archived).length;
+    const finishedWorkOrders = workOrdersDB.filter(wo => isWorkOrderCompleted(wo) || wo.archived).length;
     document.getElementById('dashboardActiveWO').textContent = activeWorkOrders;
     document.getElementById('dashboardFinishedWO').textContent = finishedWorkOrders;
 
@@ -1610,9 +1708,10 @@ function renderDashboard() {
     const yesterdayDowntimeHours = (yesterdayDowntime / 60).toFixed(1);
     document.getElementById('dashboardDowntimeToday').textContent = `${yesterdayDowntimeHours} hrs`;
 
+    // حساب الوزن مع تضمين الأوامر المؤرشفة
     let minTotalWeight = 0, minCompletedWeight = 0, finTotalWeight = 0, finCompletedWeight = 0;
     workOrdersDB.forEach(wo => {
-        if (wo.archived) return;
+        // لا نستثني الأوامر المؤرشفة
         wo.items.forEach(item => {
             const w = item.weightPerPiece || 0;
             const totalW = item.quantity * w;
@@ -1766,14 +1865,16 @@ function buildStageSummaryRowsHTML(agg) {
 }
 
 function renderStageSummaryInto(headEl, bodyEl, salesOrderFilter) {
-    const scope = workOrdersDB.filter(wo => !wo.archived && (!salesOrderFilter || wo.salesOrderNumber === salesOrderFilter));
+    // Modified: include archived orders
+    const scope = workOrdersDB.filter(wo => (!salesOrderFilter || wo.salesOrderNumber === salesOrderFilter));
     const agg = computeStageSummary(scope);
     headEl.innerHTML = buildStageSummaryHeaderHTML();
     bodyEl.innerHTML = buildStageSummaryRowsHTML(agg);
 }
 
 function getDistinctSalesOrders() {
-    return [...new Set(workOrdersDB.filter(wo => !wo.archived).map(wo => wo.salesOrderNumber).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+    // Modified: include archived orders
+    return [...new Set(workOrdersDB.map(wo => wo.salesOrderNumber).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
 }
 
 function populateDashboardStageSummarySO() {
@@ -2066,8 +2167,9 @@ function populateProjectDropdown() {
 function populateDailyReportWorkOrders() {
     const sel = document.getElementById('dailyReportWorkOrder');
     if (sel) {
+        // Include archived orders
         sel.innerHTML = '<option value="">All Work Orders</option>';
-        workOrdersDB.filter(wo => !isWorkOrderCompleted(wo) && !wo.archived).forEach(wo => { sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`; });
+        workOrdersDB.forEach(wo => { sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`; });
     }
 }
 
@@ -2077,8 +2179,7 @@ function populateReportDropdowns() {
     const allOption = '<option value="all">All Work Orders</option>';
     const placeholder = '<option disabled selected>Select work order...</option>';
     const opts = workOrdersDB.map(wo => {
-        const suffix = wo.archived ? ' (Archived)' : '';
-        return `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}${suffix}</option>`;
+        return `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`;
     }).join('');
     if (sel1) sel1.innerHTML = allOption + opts;
     if (sel2) sel2.innerHTML = placeholder + opts;
@@ -2087,8 +2188,9 @@ function populateReportDropdowns() {
 function populateNCRWorkOrders() {
     const sel = document.getElementById('ncrWorkOrder');
     if (!sel) return;
+    // Include archived orders
     sel.innerHTML = '<option value="" disabled selected>Select work order...</option>';
-    workOrdersDB.filter(wo => !wo.archived).forEach(wo => {
+    workOrdersDB.forEach(wo => {
         sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`;
     });
 }
@@ -2096,8 +2198,9 @@ function populateNCRWorkOrders() {
 function populateShortageWorkOrders() {
     const sel = document.getElementById('shortageWorkOrder');
     if (sel) {
+        // Include archived orders that are not completely finished
         sel.innerHTML = '<option value="">All Work Orders</option>';
-        workOrdersDB.filter(wo => !wo.archived && !isWorkOrderCompleted(wo)).forEach(wo => {
+        workOrdersDB.filter(wo => !isWorkOrderCompleted(wo)).forEach(wo => {
             sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`;
         });
     }
@@ -2129,7 +2232,8 @@ function populateWorkOrdersForOperation() {
     if (catContainer) catContainer.classList.remove('hidden');
     if (sel) {
         sel.innerHTML = '<option value="">All Work Orders</option>';
-        let filtered = workOrdersDB.filter(wo => !wo.archived);
+        // Include archived orders
+        let filtered = workOrdersDB;
         if (salesOrder) {
             filtered = filtered.filter(wo => wo.salesOrderNumber === salesOrder);
         }
@@ -2159,6 +2263,7 @@ function renderModelsList() {
     });
 }
 
+// ====== MODIFIED: renderWorkOrdersList to show archived orders in Finished ======
 function renderWorkOrdersList() {
     const container = document.getElementById('workOrdersContainer');
     const search = document.getElementById('workOrderSearch').value.toLowerCase();
@@ -2167,9 +2272,8 @@ function renderWorkOrdersList() {
     if (currentWorkOrderFilter === 'inprogress') {
         filtered = workOrdersDB.filter(wo => !wo.items.every(i => i.status === 'Completed') && !wo.archived);
     } else if (currentWorkOrderFilter === 'finished') {
-        filtered = workOrdersDB.filter(wo => wo.items.every(i => i.status === 'Completed') && !wo.archived);
-    } else if (currentWorkOrderFilter === 'archived') {
-        filtered = workOrdersDB.filter(wo => wo.archived === true);
+        // عرض الأوامر المكتملة والأوامر المؤرشفة معاً
+        filtered = workOrdersDB.filter(wo => wo.items.every(i => i.status === 'Completed') || wo.archived === true);
     }
     filtered = filtered.filter(wo =>
         wo.workOrderName.toLowerCase().includes(search) ||
@@ -2180,7 +2284,6 @@ function renderWorkOrdersList() {
     );
     if (filtered.length === 0) {
         let msg = 'No work orders.';
-        if (currentWorkOrderFilter === 'archived') msg = 'No archived work orders.';
         container.innerHTML = `<p class="text-center text-gray-500 col-span-2 py-10">${msg}</p>`;
         return;
     }
@@ -2191,21 +2294,36 @@ function renderWorkOrdersList() {
         const isFinished = wo.items.every(i => i.status === 'Completed');
         const hasProduction = productionDB.some(r => r.workOrderId === wo.id);
         const completionPercent = getWorkOrderCompletionPercentage(wo);
-        const canArchive = (!isFinished && completionPercent >= 90 && !wo.archived && currentWorkOrderFilter === 'inprogress' && hasPermission('canEditWorkOrder'));
+        const isArchived = wo.archived === true;
+        
+        const canMarkFinished = (!isFinished && completionPercent >= 90 && !wo.archived && 
+            currentWorkOrderFilter === 'inprogress' && hasPermission('canMarkAsFinished'));
+        
         const card = document.createElement('div');
         card.className = 'card cursor-pointer hover:shadow-lg transition';
+        
+        // حساب الوزن الإجمالي للأمر
+        let totalOrderWeight = 0;
+        let completedOrderWeight = 0;
+        wo.items.forEach(item => {
+            const w = item.weightPerPiece || 0;
+            totalOrderWeight += item.quantity * w;
+            completedOrderWeight += (item.completedQuantity || 0) * w;
+        });
+        
         card.innerHTML = `
          <div class="p-4">
              <div class="flex justify-between">
                  <div>
-                     <h4 class="font-bold">${wo.workOrderName} ${wo.archived ? '<span class="text-xs text-gray-400 ml-2">(Archived)</span>' : ''}</h4>
+                     <h4 class="font-bold">${wo.workOrderName} ${isArchived ? '<span class="text-xs text-gray-400 ml-2">(Archived → Finished)</span>' : ''}</h4>
                      <div class="flex gap-2 mt-2 flex-wrap">
                          <span class="badge badge-info">${wo.type}</span>
                          <span class="badge badge-warning">${wo.model}</span>
                          <span class="badge badge-success text-xs">${wo.date}</span>
-                         ${isFinished ? '<span class="badge badge-primary"><i class="fa-solid fa-check-circle"></i> Finished</span>' : '<span class="badge badge-warning"><i class="fa-solid fa-spinner"></i> In Progress</span>'}
+                         ${isFinished || isArchived ? '<span class="badge badge-primary"><i class="fa-solid fa-check-circle"></i> Finished</span>' : '<span class="badge badge-warning"><i class="fa-solid fa-spinner"></i> In Progress</span>'}
                          ${hasProduction ? '<span class="text-xs text-yellow-600"><i class="fa-solid fa-industry"></i> Has Production</span>' : ''}
-                         ${wo.archived ? '<span class="badge badge-secondary"><i class="fa-solid fa-archive"></i> Archived</span>' : ''}
+                         ${isArchived ? '<span class="badge badge-secondary"><i class="fa-solid fa-archive"></i> Archived</span>' : ''}
+                         <span class="text-xs text-gray-500">Weight: ${(completedOrderWeight / 1000).toFixed(2)} / ${(totalOrderWeight / 1000).toFixed(2)} tons</span>
                      </div>
                  </div>
                  <div class="text-right">
@@ -2219,13 +2337,21 @@ function renderWorkOrdersList() {
                      <div class="text-sm">
                          <span><i class="fa-solid fa-building mr-1"></i> ${wo.projectName}</span>
                          <span class="block mt-1"><i class="fa-solid fa-tag mr-1"></i> ${wo.salesOrderNumber}</span>
+                         <span class="block mt-1 text-xs text-gray-500">Total Weight: ${(totalOrderWeight / 1000).toFixed(2)} tons</span>
                      </div>
                      <div class="flex flex-col items-end gap-2">
                          <div class="text-xs text-gray-500">${wo.creationTime}</div>
                          <div class="flex gap-2">
-                             ${canArchive ? `<button onclick="event.stopPropagation(); archiveWorkOrder(${wo.id})" class="btn btn-outline btn-sm text-blue-600" title="Archive (≥90%)"><i class="fa-solid fa-archive"></i> Archive</button>` : ''}
-                             ${!hasProduction && !wo.archived && hasPermission('canDeleteWorkOrder') ? `<button onclick="event.stopPropagation(); showDeleteWorkOrderConfirmation(${wo.id})" class="delete-btn text-red-500 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}
-                             ${wo.archived && !hasProduction && hasPermission('canDeleteWorkOrder') ? `<button onclick="event.stopPropagation(); showDeleteWorkOrderConfirmation(${wo.id})" class="delete-btn text-red-500 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}
+                             ${canMarkFinished ? `
+                             <button onclick="event.stopPropagation(); markWorkOrderAsFinished(${wo.id})" 
+                                 class="btn btn-success btn-lg font-bold text-white px-6 py-2 rounded-lg border-4 border-green-700 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
+                                 style="background: linear-gradient(135deg, #22c55e, #16a34a); border-color: #15803d; box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);">
+                                 <i class="fa-solid fa-flag-checkered text-xl"></i>
+                                 <span class="text-lg">${translations[currentLanguage].markAsFinished || 'Mark as Finished'}</span>
+                             </button>
+                             ` : ''}
+                             ${!hasProduction && !wo.archived && hasPermission('canDeleteWorkOrder') ? 
+                             `<button onclick="event.stopPropagation(); showDeleteWorkOrderConfirmation(${wo.id})" class="delete-btn text-red-500 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}
                          </div>
                      </div>
                  </div>
@@ -2237,26 +2363,29 @@ function renderWorkOrdersList() {
     });
 }
 
-async function archiveWorkOrder(id) {
-    if (!hasPermission('canEditWorkOrder')) {
-        showToast('غير مسموح لك بأرشفة أوامر العمل', 'error');
+// ====== NEW: markWorkOrderAsFinished (Admin only) ======
+async function markWorkOrderAsFinished(id) {
+    if (!hasPermission('canMarkAsFinished')) {
+        showToast('❌ غير مسموح لك بإنهاء أوامر العمل. هذه الصلاحية للمدير فقط.', 'error');
         return;
     }
     const t = translations[currentLanguage];
     const wo = workOrdersDB.find(w => w.id === id);
     if (!wo) return;
     if (wo.archived) {
-        showToast('Work order is already archived', 'warning');
+        showToast('⚠️ Work order is already finished', 'warning');
         return;
     }
     const percent = getWorkOrderCompletionPercentage(wo);
     if (percent < 90) {
-        showToast(`Cannot archive. Work order is only ${percent.toFixed(1)}% complete (min 90%)`, 'warning');
+        showToast(`${t.minCompletionRequired || 'Minimum 90% completion required to mark as finished'} (${percent.toFixed(1)}%)`, 'warning');
         return;
     }
-    if (confirm(`Archive work order "${wo.workOrderName}"? It will be moved to Archived list.`)) {
+    if (confirm(t.markAsFinishedConfirm || `Mark work order "${wo.workOrderName}" as Finished? (≥90% complete)\nIncomplete items will remain and can be completed later.`)) {
         wo.archived = true;
         await saveToServer('workOrdersDB', workOrdersDB);
+        // إنشاء سجلات إنتاج للأمر المنتهي
+        await createProductionRecordsForArchivedOrders();
         renderWorkOrdersList();
         renderDashboard();
         populateProductionTowerTypeDropdown();
@@ -2265,144 +2394,8 @@ async function archiveWorkOrder(id) {
         populateReportDropdowns();
         populateShortageWorkOrders();
         populateWorkOrdersForOperation();
-        showToast('Work order archived successfully', 'success');
+        showToast(`✅ Work order "${wo.workOrderName}" marked as Finished successfully by Admin!`, 'success');
     }
-}
-
-function renderProductionList() {
-    const container = document.getElementById('productionContainer');
-    const search = document.getElementById('productionSearch').value.toLowerCase();
-    container.innerHTML = '';
-    const sorted = [...productionDB].sort((a, b) => b.timestamp - a.timestamp);
-    let filtered = [];
-    if (search) filtered = sorted.filter(r => r.workOrderName.toLowerCase().includes(search) || r.projectName.toLowerCase().includes(search) || r.machine.toLowerCase().includes(search) || r.itemName.toLowerCase().includes(search) || r.operator.toLowerCase().includes(search));
-    else {
-        filtered = sorted.slice(0, 10);
-        if (productionDB.length > 10) {
-            const msg = translations[currentLanguage].showingLatestRecords.replace('{{total}}', productionDB.length);
-            container.innerHTML = `<div class="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded mb-4"><div class="flex"><i class="fa-solid fa-info-circle mr-2"></i><p class="text-sm">${msg}</p></div></div>`;
-        }
-    }
-    if (filtered.length === 0) { container.innerHTML += '<p class="text-center text-gray-500 py-10">No production records found.</p>'; return; }
-    filtered.forEach(rec => {
-        const date = new Date(rec.timestamp).toLocaleDateString();
-        const time = new Date(rec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const card = document.createElement('div');
-        card.className = 'card hover:shadow-lg transition';
-        card.innerHTML = `<div class="p-4"><div class="flex justify-between"><div><h4 class="font-bold">${rec.itemName}</h4><div class="flex gap-2 mt-2"><span class="badge badge-info">${rec.towerType}</span><span class="badge badge-warning">${rec.machine}</span><span class="badge badge-success">${rec.operation}</span></div></div><div class="text-right"><span class="block font-bold text-purple-600">${rec.quantity} pieces</span><span class="block text-sm text-green-600">${rec.producedWeight || 0} kg</span><span class="text-xs text-gray-500">${rec.shift}</span></div></div><div class="mt-4 pt-4 border-t"><div class="flex justify-between"><div class="text-sm"><span><i class="fa-solid fa-file-contract mr-1"></i> ${rec.workOrderName}</span><span class="block mt-1"><i class="fa-solid fa-building mr-1"></i> ${rec.projectName}</span></div><div class="flex flex-col items-end"><div class="text-xs text-gray-500">${date} - ${time}</div>${hasPermission('canDeleteProduction') ? `<button onclick="event.stopPropagation(); showDeleteProductionConfirmation(${rec.id})" class="delete-btn text-red-500 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}</div></div></div></div></div>`;
-        card.querySelector('.flex.justify-between').onclick = () => showProductionDetails(rec.id);
-        container.appendChild(card);
-    });
-}
-
-function renderDowntimeList() {
-    const container = document.getElementById('downtimeContainer');
-    const search = document.getElementById('downtimeSearch').value.toLowerCase();
-    const sorted = [...downtimeDB].sort((a, b) => b.timestamp - a.timestamp);
-    let filtered = [];
-    let prefix = '';
-    if (search) filtered = sorted.filter(r => r.machine.toLowerCase().includes(search) || r.downtimeType.toLowerCase().includes(search) || (r.description && r.description.toLowerCase().includes(search)));
-    else {
-        filtered = sorted.slice(0, 10);
-        if (downtimeDB.length > 10) {
-            const msg = translations[currentLanguage].showingLatestDowntimeRecords.replace('{{total}}', downtimeDB.length);
-            prefix = `<div class="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded mb-4"><div class="flex"><i class="fa-solid fa-info-circle mr-2"></i><p class="text-sm">${msg}</p></div></div>`;
-        }
-    }
-    if (filtered.length === 0) { container.innerHTML = prefix + '<p class="text-center text-gray-500 py-10">No downtime records.</p>'; return; }
-    const cards = [];
-    filtered.forEach(rec => {
-        const date = new Date(rec.timestamp).toLocaleDateString();
-        const time = new Date(rec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        let typeClass = 'badge badge-danger';
-        if (rec.downtimeType === 'Maintenance') typeClass = 'badge badge-warning';
-        else if (rec.downtimeType === 'Planning Load') typeClass = 'badge badge-info';
-        else if (rec.downtimeType === 'Material Issue') typeClass = 'badge badge-secondary';
-        else if (rec.downtimeType === 'Labor Shortage') typeClass = 'badge badge-primary';
-        else if (rec.downtimeType === 'Quality') typeClass = 'badge badge-danger';
-        cards.push(`<div class="card hover:shadow-lg transition"><div class="p-4"><div class="flex justify-between"><div><h4 class="font-bold">${rec.machine}</h4><div class="flex gap-2 mt-2"><span class="${typeClass}">${rec.downtimeType}</span><span class="badge badge-info">${rec.durationMinutes} min</span>${rec.shift ? `<span class="badge badge-success">${rec.shift}</span>` : ''}</div></div><div class="text-right"><span class="block font-bold text-red-600">${rec.durationMinutes} min</span><span class="text-xs text-gray-500">${rec.date}</span></div></div><div class="mt-4 pt-4 border-t"><div class="flex justify-between"><div class="text-sm"><i class="fa-solid fa-align-left mr-1"></i> ${rec.description || 'No description'}</div><div class="flex flex-col items-end"><div class="text-xs text-gray-500">${date} - ${time}</div>${hasPermission('canDeleteDowntime') ? `<button onclick="showDeleteDowntimeConfirmation(${rec.id})" class="delete-btn text-red-500 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}</div></div></div></div></div>`);
-    });
-    container.innerHTML = prefix + cards.join('');
-}
-
-function renderNCRList() {
-    const container = document.getElementById('ncrContainer');
-    const search = document.getElementById('ncrSearch')?.value.toLowerCase() || '';
-    if (!container) return;
-    const sorted = [...ncrDB].sort((a, b) => b.timestamp - a.timestamp);
-    let filtered = sorted;
-    if (search) {
-        filtered = sorted.filter(r => r.workOrderName.toLowerCase().includes(search) || r.itemName.toLowerCase().includes(search) || r.machine.toLowerCase().includes(search) || r.ncrType.toLowerCase().includes(search));
-    }
-    if (filtered.length === 0) {
-        container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No NCR records.</p>';
-        return;
-    }
-    const cards = [];
-    filtered.forEach(rec => {
-        const dateStr = new Date(rec.timestamp).toLocaleDateString();
-        const timeStr = new Date(rec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        let typeClass = 'badge-danger';
-        if (rec.ncrType === 'Accept as it is') typeClass = 'badge-warning';
-        else if (rec.ncrType === 'Repair') typeClass = 'badge-info';
-        cards.push(`<div class="card hover:shadow-lg transition"> <div class="p-4"> <div class="flex justify-between"> <div> <h4 class="font-bold">${esc(rec.itemName)}</h4> <div class="flex gap-2 mt-2"> <span class="badge ${typeClass}">${esc(rec.ncrType)}</span> <span class="badge badge-danger">${rec.rejectedQty} pcs</span> <span class="badge badge-info">${esc(rec.machine)}</span> </div> </div> <div class="text-right"> <span class="block font-bold text-red-600">${rec.rejectedQty} rejected</span> <span class="text-xs text-gray-500">${esc(rec.date)} - ${esc(rec.shift)}</span> </div> </div> <div class="mt-4 pt-4 border-t"> <div class="flex justify-between"> <div class="text-sm"> <i class="fa-solid fa-file-contract mr-1"></i> ${esc(rec.workOrderName)}<br> <i class="fa-solid fa-comment mr-1"></i> ${esc(rec.comment || 'No comment')} </div> <div class="flex flex-col items-end"> <div class="text-xs text-gray-500">${dateStr} - ${timeStr}</div> ${hasPermission('canDeleteNCR') ? `<button onclick="showDeleteNCRConfirmation(${rec.id})" class="delete-btn text-red-500 text-sm mt-1"><i class="fa-solid fa-trash"></i> Delete</button>` : ''} </div> </div> </div> </div> </div>`);
-    });
-    container.innerHTML = cards.join('');
-}
-
-function renderEmployeesList() {
-    const container = document.getElementById('employeesContainer');
-    const search = document.getElementById('employeeSearch')?.value.toLowerCase() || '';
-    if (!container) return;
-    let filtered = employeesDB;
-    if (search) {
-        filtered = employeesDB.filter(e => e.name.toLowerCase().includes(search) || e.id.toLowerCase().includes(search));
-    }
-    if (filtered.length === 0) {
-        container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No employees. Add your first employee.</p>';
-        updateEmployeesStats();
-        return;
-    }
-    const cards = [];
-    filtered.forEach(emp => {
-        const statusClass = emp.status === 'Active' ? 'badge-success' : (emp.status === 'On Leave' ? 'badge-warning' : 'badge-danger');
-        cards.push(`<div class="card hover:shadow-lg transition"> <div class="p-4"> <div class="flex justify-between items-start"> <div> <h4 class="font-bold">${esc(emp.name)}</h4> <div class="flex flex-wrap gap-2 mt-2"> <span class="badge badge-info">${esc(emp.id)}</span> <span class="badge ${statusClass}">${esc(emp.status)}</span> <span class="badge badge-primary">${esc(emp.position || 'Operator')}</span> </div> <div class="mt-2 text-sm text-gray-600"> <div><i class="fa-solid fa-building mr-1"></i> ${esc(emp.department || 'Production')}</div> <div><i class="fa-solid fa-clock mr-1"></i> ${esc(emp.shift || 'First Shift')}</div> ${emp.phone ? `<div><i class="fa-solid fa-phone mr-1"></i> ${esc(emp.phone)}</div>` : ''} ${emp.hireDate ? `<div><i class="fa-solid fa-calendar mr-1"></i> Hire: ${esc(emp.hireDate)}</div>` : ''} </div> </div> <div class="flex gap-2"> ${hasPermission('canManageEmployees') ? `<button onclick="editEmployee('${esc(emp.id)}')" class="btn btn-outline btn-sm" title="Edit"><i class="fa-solid fa-edit"></i></button>` : ''} ${hasPermission('canManageEmployees') ? `<button onclick="showDeleteEmployeeConfirmation('${esc(emp.id)}')" class="delete-btn text-red-500 text-sm" title="Delete"><i class="fa-solid fa-trash"></i></button>` : ''} </div> </div> </div> </div>`);
-    });
-    container.innerHTML = cards.join('');
-    updateEmployeesStats();
-}
-
-function updateEmployeesStats() {
-    const total = employeesDB.length;
-    const active = employeesDB.filter(e => e.status === 'Active').length;
-    const totalSpan = document.getElementById('totalEmployees');
-    const activeSpan = document.getElementById('activeEmployees');
-    if (totalSpan) totalSpan.textContent = total;
-    if (activeSpan) activeSpan.textContent = active;
-}
-
-function showDetails(id) {
-    const entry = db.find(m => m.id === id);
-    if (!entry) return;
-    document.getElementById('viewTitle').textContent = entry.model;
-    document.getElementById('viewType').textContent = entry.type;
-    const tbody = document.getElementById('detailsTableBody');
-    const detailRows = [];
-    entry.items.forEach((item, idx) => {
-        let opsHtml = '';
-        item.operations.forEach((op, i) => {
-            let color = 'bg-gray-100 text-gray-700';
-            if (op.type === 'primary' || op.type === 'minimum') color = 'bg-blue-100 text-blue-800';
-            if (op.type === 'finish') color = 'bg-green-100 text-green-800';
-            if (op.type === 'cutting' || op.type === 'shearing') color = 'bg-orange-100 text-orange-800';
-            if (op.type === 'forming' || op.type === 'bending') color = 'bg-purple-100 text-purple-800';
-            opsHtml += `<div class="inline-flex items-center">${i > 0 ? '<i class="fa-solid fa-arrow-right text-gray-300 mx-1 text-xs"></i>' : ''}<span class="px-2 py-1 text-xs rounded ${color}">${op.name}</span></div>`;
-        });
-        detailRows.push(`<tr><td class="text-center">${idx + 1}</td><td class="font-bold">${item.itemName}</td><td><span class="px-2 py-1 text-xs rounded-full ${item.section.startsWith('L') ? 'bg-indigo-100' : (item.section.startsWith('P') || item.section.startsWith('F')) ? 'bg-teal-100' : 'bg-pink-100'}">${item.section}</span></td><td class="text-center">${item.steelGrade || '-'}</td><td class="text-center">${opsHtml}</td></tr>`);
-    });
-    tbody.innerHTML = detailRows.join('');
-    document.getElementById('detailsView').classList.remove('hidden');
-    document.getElementById('detailsView').scrollIntoView({ behavior: 'smooth' });
 }
 
 // ====== Work Order Details with Approve/Block ======
@@ -2586,7 +2579,7 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
                     producedWeight: prodWeight,
                     weightPerPiece: item.weightPerPiece,
                     totalItemWeight: item.totalWeight,
-                    notes: `Auto-completed from Archived Work Order on ${completionDate} by Balance`,
+                    notes: `Auto-completed from Finished Work Order on ${completionDate} by Balance`,
                     timestamp: Date.now(),
                     recordedBy: currentUser ? currentUser.username : 'system'
                 };
@@ -2608,8 +2601,7 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
         item.status = 'Completed';
         const allCompleted = wo.items.every(it => (it.completedQuantity || 0) >= it.quantity);
         if (allCompleted && wo.archived === true) {
-            wo.archived = false;
-            showToast(`Work order "${wo.workOrderName}" is now fully completed and moved to Finished Work Orders`, 'success');
+            showToast(`Work order "${wo.workOrderName}" is now fully completed`, 'success');
         } else {
             showToast(`Item "${item.itemName}" completed successfully with Balance operator`, 'success');
         }
@@ -3020,7 +3012,7 @@ function canMachineDoOperation(machine, opName, section) {
     return false;
 }
 
-// ====== Record Production (modified to include recordedBy) ======
+// ====== Record Production ======
 async function recordProduction() {
     if (!hasPermission('canRecordProduction')) {
         showToast('غير مسموح لك بتسجيل الإنتاج', 'error');
@@ -3986,7 +3978,7 @@ function filterItemsForReport() {
     renderItemsForReport(allItemsForReportFiltered);
 }
 
-// ====== Generate Reports (with permission checks for filtering) ======
+// ====== Generate Reports ======
 async function generateItemsStatusReport() {
     if (!hasPermission('canViewReports')) {
         showToast('غير مسموح لك بعرض التقارير', 'error');
@@ -3995,7 +3987,8 @@ async function generateItemsStatusReport() {
     const woValue = document.getElementById('reportWorkOrder') ? document.getElementById('reportWorkOrder').value : null;
     let selectedWOs = [];
     if (!woValue || woValue === 'all') {
-        selectedWOs = workOrdersDB.filter(wo => !wo.archived);
+        // Include all work orders, including archived
+        selectedWOs = workOrdersDB;
     } else {
         const wo = workOrdersDB.find(w => w.id === parseInt(woValue));
         if (wo) selectedWOs = [wo];
@@ -4246,7 +4239,7 @@ async function generateOperationStatusReport() {
         let totalReq = 0, totalWt = 0, totalComp = 0, totalRem = 0;
         const woIdInt = woId ? parseInt(woId) : null;
         workOrdersDB.forEach(wo => {
-            if (wo.archived) return;
+            // Do not exclude archived orders
             if (woIdInt && wo.id !== woIdInt) return;
             if (salesOrder && wo.salesOrderNumber !== salesOrder) return;
             wo.items.forEach(it => {
@@ -4353,7 +4346,7 @@ function generateShortageReport() {
     const selectedId = woId ? parseInt(woId) : null;
     let shortages = [];
     workOrdersDB.forEach(wo => {
-        if (wo.archived) return;
+        // Include archived orders as well
         if (selectedId && wo.id !== selectedId) return;
         wo.items.forEach(it => {
             const remaining = it.quantity - (it.completedQuantity || 0);
@@ -4584,7 +4577,8 @@ async function generateProjectStageSummary() {
     showLoading(translations[currentLanguage].processing || 'Processing...');
     await yieldToUI();
     try {
-        const scope = workOrdersDB.filter(wo => !wo.archived && (!salesOrderFilter || wo.salesOrderNumber === salesOrderFilter));
+        // Include archived orders
+        const scope = workOrdersDB.filter(wo => (!salesOrderFilter || wo.salesOrderNumber === salesOrderFilter));
         const agg = computeStageSummary(scope);
         const scopeLabel = salesOrderFilter
             ? ('SO ' + salesOrderFilter)
@@ -4613,7 +4607,8 @@ async function generateMinimumStoppageReport() {
     showLoading(translations[currentLanguage].processing || 'Processing...');
     await yieldToUI();
     try {
-        const scope = workOrdersDB.filter(wo => !wo.archived && (!soFilter || wo.salesOrderNumber === soFilter));
+        // Include archived orders
+        const scope = workOrdersDB.filter(wo => (!soFilter || wo.salesOrderNumber === soFilter));
         const rows = [];
         let totalQty = 0, totalWt = 0;
         scope.forEach(wo => {
@@ -5275,8 +5270,7 @@ function setWorkOrderFilter(filter) {
     currentWorkOrderFilter = filter;
     const inProgressBtn = document.getElementById('filterInProgressBtn');
     const finishedBtn = document.getElementById('filterFinishedBtn');
-    const archivedBtn = document.getElementById('filterArchivedBtn');
-    [inProgressBtn, finishedBtn, archivedBtn].forEach(btn => {
+    [inProgressBtn, finishedBtn].forEach(btn => {
         if (btn) {
             btn.classList.remove('btn-primary');
             btn.classList.add('btn-outline');
@@ -5288,9 +5282,6 @@ function setWorkOrderFilter(filter) {
     } else if (filter === 'finished') {
         finishedBtn.classList.remove('btn-outline');
         finishedBtn.classList.add('btn-primary');
-    } else if (filter === 'archived') {
-        archivedBtn.classList.remove('btn-outline');
-        archivedBtn.classList.add('btn-primary');
     }
     renderWorkOrdersList();
 }

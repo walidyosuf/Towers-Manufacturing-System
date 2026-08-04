@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <style>
-        /* ===== جميع الأنماط الأصلية ===== */
+        /* ===== جميع الأنماط ===== */
         :root {
             --primary-color: #1a237e;
             --secondary-color: #ff9800;
@@ -336,6 +336,15 @@
         .btn-lg {
             padding: 0.875rem 1.75rem;
             font-size: 1rem;
+        }
+
+        .btn-success {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #388e3c;
         }
 
         .input-group {
@@ -1330,6 +1339,58 @@
         .hidden-main {
             display: none !important;
         }
+
+        /* زر Mark as Finished مميز */
+        .btn-mark-finished {
+            background: linear-gradient(135deg, #22c55e, #16a34a) !important;
+            border: 4px solid #15803d !important;
+            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4) !important;
+            padding: 0.5rem 1.5rem !important;
+            border-radius: 0.5rem !important;
+            font-weight: 700 !important;
+            font-size: 1rem !important;
+            color: white !important;
+            transition: all 0.2s ease !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 0.5rem !important;
+        }
+
+        .btn-mark-finished:hover {
+            transform: scale(1.05) !important;
+            box-shadow: 0 6px 25px rgba(34, 197, 94, 0.5) !important;
+        }
+
+        .btn-mark-finished i {
+            font-size: 1.25rem !important;
+        }
+
+        /* زر نقل الأوامر المؤرشفة */
+        .btn-convert-archived {
+            background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+            border: 3px solid #b45309 !important;
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4) !important;
+            padding: 0.75rem 1.5rem !important;
+            border-radius: 0.5rem !important;
+            font-weight: 700 !important;
+            font-size: 1rem !important;
+            color: white !important;
+            transition: all 0.2s ease !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 0.75rem !important;
+            width: 100% !important;
+            justify-content: center !important;
+        }
+
+        .btn-convert-archived:hover {
+            transform: scale(1.02) !important;
+            box-shadow: 0 6px 25px rgba(245, 158, 11, 0.5) !important;
+        }
+
+        .btn-convert-archived i {
+            font-size: 1.25rem !important;
+        }
     </style>
 </head>
 <body class="text-gray-800 ltr">
@@ -1743,7 +1804,6 @@
                         <div class="flex gap-2">
                             <button onclick="setWorkOrderFilter('inprogress')" id="filterInProgressBtn" class="btn btn-sm btn-primary"><i class="fa-solid fa-spinner"></i> <span data-i18n="inProgressWorkOrders">In Progress Work Orders</span></button>
                             <button onclick="setWorkOrderFilter('finished')" id="filterFinishedBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-check-circle"></i> <span data-i18n="finishedOrders">Finished Orders</span></button>
-                            <button onclick="setWorkOrderFilter('archived')" id="filterArchivedBtn" class="btn btn-sm btn-outline"><i class="fa-solid fa-archive"></i> <span>Archived Work Orders</span></button>
                         </div>
                         <div class="relative"><input type="text" id="workOrderSearch" onkeyup="renderWorkOrdersList()" class="input-field w-64" data-i18n-placeholder="searchWorkOrders" placeholder="Search work orders..."><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div>
                     </div>
@@ -1752,7 +1812,7 @@
             </div>
             <div id="workOrderDetailsView" class="card hidden fade-in">
                 <div class="card-header"><div><h3 class="text-xl font-bold"><i class="fa-solid fa-file-contract mr-2 text-green-600"></i> <span data-i18n="workOrderDetails">Work Order Details</span>: <span id="workOrderTitle"></span></h3><div class="flex gap-2 mt-2"><span id="workOrderType" class="badge badge-info"></span><span id="workOrderDate" class="text-sm text-gray-500"></span></div></div><div class="action-buttons"><button onclick="exportWorkOrderToExcel()" class="btn btn-secondary btn-sm"><i class="fa-solid fa-file-excel"></i> <span data-i18n="exportExcel">Excel</span></button><button onclick="generateWorkOrderStatusReport()" class="btn btn-warning btn-sm"><i class="fa-solid fa-chart-bar"></i> <span data-i18n="generateReport">Report</span></button><button onclick="hideWorkOrderDetails()" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i> <span data-i18n="close">Close</span></button></div></div>
-                <div class="card-body"><div class="card bg-gray-50 mb-6"><div class="card-body"><div class="grid grid-cols-2 md:grid-cols-4 gap-4"><div><span class="text-sm text-gray-500" data-i18n="project">Project:</span><span id="workOrderProject" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="salesOrder">Sales Order:</span><span id="workOrderSalesNumber" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="creationDate">Creation Date:</span><span id="workOrderCreationDate" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="totalItems">Total Items:</span><span id="workOrderTotalItems" class="font-bold block"></span></div></div></div></div><div class="table-container"><table class="table report-table"><thead><tr><th>#</th><th data-i18n="itemName">Item Name</th><th data-i18n="section">Section</th><th data-i18n="steelGrade">Steel Grade</th><th data-i18n="length">Length</th><th data-i18n="quantity">Quantity</th><th data-i18n="weightPiece">Weight/Piece</th><th data-i18n="totalWeight">Total Weight</th><th data-i18n="operations">Operations</th><th data-i18n="status">Status</th></tr></thead><tbody id="workOrderDetailsTableBody"></tbody></table></div></div>
+                <div class="card-body"><div class="card bg-gray-50 mb-6"><div class="card-body"><div class="grid grid-cols-2 md:grid-cols-4 gap-4"><div><span class="text-sm text-gray-500" data-i18n="project">Project:</span><span id="workOrderProject" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="salesOrder">Sales Order:</span><span id="workOrderSalesNumber" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="creationDate">Creation Date:</span><span id="workOrderCreationDate" class="font-bold block"></span></div><div><span class="text-sm text-gray-500" data-i18n="totalItems">Total Items:</span><span id="workOrderTotalItems" class="font-bold block"></span></div></div></div></div><div class="table-container"><table class="table report-table"><thead><tr><th>#</th><th data-i18n="itemName">Item Name</th><th data-i18n="section">Section</th><th data-i18n="steelGrade">Steel Grade</th><th data-i18n="length">Length</th><th data-i18n="quantity">Quantity</th><th data-i18n="weightPiece">Weight/Piece</th><th data-i18n="totalWeight">Total Weight</th><th data-i18n="operations">Operations</th><th data-i18n="status">Status</th><th data-i18n="actions">Actions</th></tr></thead><tbody id="workOrderDetailsTableBody"></tbody></table></div></div>
             </div>
         </section>
 
@@ -2202,7 +2262,7 @@
         <div class="modal-content" style="background: transparent; box-shadow: none;"><div class="text-center"><div class="spinner mx-auto mb-4"></div><p class="text-white font-medium" id="loadingText" data-i18n="processing">Processing...</p></div></div>
     </div>
 
-    <!-- Settings Modal (مع حاوية إدارة المستخدمين) -->
+    <!-- Settings Modal (مع حاوية إدارة المستخدمين وزر نقل الأوامر المؤرشفة) -->
     <div class="modal" id="settingsModal">
         <div class="modal-content">
             <div class="modal-header">
@@ -2214,6 +2274,13 @@
                     <button onclick="showBackupModal()" class="btn btn-primary w-full"><span data-i18n="backup">Backup</span></button>
                     <button onclick="showOperatorsManagement()" class="btn btn-warning w-full"><span data-i18n="manageOperators">Manage Operators</span></button>
                     <button onclick="showIdealRatesManagement()" class="btn btn-secondary w-full"><span data-i18n="manageIdealRates">Set Machine Ideal Rates (OEE/TEEP)</span></button>
+                    
+                    <!-- زر نقل الأوامر المؤرشفة -->
+                    <button onclick="convertArchivedToFinished()" class="btn-convert-archived">
+                        <i class="fa-solid fa-arrow-right"></i>
+                        <span>نقل الأوامر المؤرشفة إلى Finished</span>
+                    </button>
+                    
                     <hr class="border-gray-200">
                     <!-- Users Management (visible only for admin) -->
                     <div id="usersManagementContainer"></div>

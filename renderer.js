@@ -3,6 +3,9 @@
 // تم التعديل: حساب الوزن من الأوامر المؤرشفة في Dashboard
 // تم التعديل: إنشاء سجلات إنتاج للأوامر المؤرشفة تلقائياً
 // تم التعديل: إدراج الأوامر المؤرشفة في جميع التقارير
+// تم التعديل: إزالة رسائل toast الخاصة بعمليات الأرشفة
+// تم التعديل: تعديل حساب Cum. Min Eff % و Cum. Finish Eff % لتصبح كفاءة تراكمية
+// تم التعديل: إصلاح عرض التقرير الشهري بحيث لا يظهر اليوم الحالي (يقتصر على الأيام المكتملة حتى أمس)
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -664,16 +667,14 @@ async function replaceAllProductionRecordsOnServer() {
     }
 }
 
-// ====== NEW: Create production records for archived orders ======
+// ====== NEW: Create production records for archived orders (without toast) ======
 async function createProductionRecordsForArchivedOrders() {
     let createdCount = 0;
     
     workOrdersDB.forEach(wo => {
         if (wo.archived === true) {
-            // التحقق من وجود سجلات إنتاج لهذا الأمر
             const existingProd = productionDB.some(r => r.workOrderId === wo.id);
             if (!existingProd) {
-                // إنشاء سجلات إنتاج لكل بند في الأمر
                 wo.items.forEach(item => {
                     const completedQty = item.completedQuantity || item.quantity || 0;
                     const weightPerPiece = item.weightPerPiece || 0;
@@ -713,12 +714,11 @@ async function createProductionRecordsForArchivedOrders() {
     
     if (createdCount > 0) {
         await flushNewProductionRecords();
-        showToast(`✅ تم إنشاء ${createdCount} سجل إنتاج للأوامر المؤرشفة`, 'success');
     }
     return createdCount;
 }
 
-// ====== NEW: Convert archived work orders to finished ======
+// ====== NEW: Convert archived work orders to finished (without toast) ======
 async function convertArchivedToFinished() {
     if (!hasPermission('canMarkAsFinished')) {
         showToast('❌ غير مسموح لك بنقل الأوامر المؤرشفة. هذه الصلاحية للمدير فقط.', 'error');
@@ -748,7 +748,6 @@ async function convertArchivedToFinished() {
         populateReportDropdowns();
         populateShortageWorkOrders();
         populateWorkOrdersForOperation();
-        showToast(`✅ تم نقل ${count} أمر عمل إلى Finished Work Orders`, 'success');
     }
 }
 
@@ -758,7 +757,6 @@ async function loadData() {
         workOrdersDB = await loadFromServer('workOrdersDB');
         workOrdersDB.forEach(wo => { if (wo.archived === undefined) wo.archived = false; });
         
-        // ===== نقل الأوامر القديمة من Archived إلى Finished تلقائياً =====
         let archivedCount = 0;
         workOrdersDB.forEach(wo => {
             if (wo.archived === true) {
@@ -770,11 +768,7 @@ async function loadData() {
             console.log(`🔄 جاري نقل ${archivedCount} أمر عمل من Archived إلى Finished...`);
             await saveToServer('workOrdersDB', workOrdersDB);
             console.log(`✅ تم نقل ${archivedCount} أمر عمل من Archived إلى Finished Work Orders`);
-            // إنشاء سجلات إنتاج للأوامر المؤرشفة
             await createProductionRecordsForArchivedOrders();
-            setTimeout(() => {
-                showToast(`✅ تم نقل ${archivedCount} أمر عمل من Archived إلى Finished Work Orders`, 'success');
-            }, 1000);
         }
         
         productionDB = await loadProductionRecords();
@@ -1686,11 +1680,9 @@ function getWorkOrderCompletionPercentage(wo) {
 }
 
 // ============= DASHBOARD =============
-// ====== MODIFIED: renderDashboard to include archived orders weight ======
 function renderDashboard() {
     document.getElementById('dashboardTimestamp').textContent = new Date().toLocaleString();
     
-    // حساب أوامر العمل النشطة والمنتهية (بما فيها المؤرشفة)
     const activeWorkOrders = workOrdersDB.filter(wo => !isWorkOrderCompleted(wo) && !wo.archived).length;
     const finishedWorkOrders = workOrdersDB.filter(wo => isWorkOrderCompleted(wo) || wo.archived).length;
     document.getElementById('dashboardActiveWO').textContent = activeWorkOrders;
@@ -1708,10 +1700,8 @@ function renderDashboard() {
     const yesterdayDowntimeHours = (yesterdayDowntime / 60).toFixed(1);
     document.getElementById('dashboardDowntimeToday').textContent = `${yesterdayDowntimeHours} hrs`;
 
-    // حساب الوزن مع تضمين الأوامر المؤرشفة
     let minTotalWeight = 0, minCompletedWeight = 0, finTotalWeight = 0, finCompletedWeight = 0;
     workOrdersDB.forEach(wo => {
-        // لا نستثني الأوامر المؤرشفة
         wo.items.forEach(item => {
             const w = item.weightPerPiece || 0;
             const totalW = item.quantity * w;
@@ -1865,7 +1855,6 @@ function buildStageSummaryRowsHTML(agg) {
 }
 
 function renderStageSummaryInto(headEl, bodyEl, salesOrderFilter) {
-    // Modified: include archived orders
     const scope = workOrdersDB.filter(wo => (!salesOrderFilter || wo.salesOrderNumber === salesOrderFilter));
     const agg = computeStageSummary(scope);
     headEl.innerHTML = buildStageSummaryHeaderHTML();
@@ -1873,7 +1862,6 @@ function renderStageSummaryInto(headEl, bodyEl, salesOrderFilter) {
 }
 
 function getDistinctSalesOrders() {
-    // Modified: include archived orders
     return [...new Set(workOrdersDB.map(wo => wo.salesOrderNumber).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
 }
 
@@ -1913,89 +1901,30 @@ function openStageSummaryFullReport() {
     if (rsel) { rsel.value = so; generateProjectStageSummary(); }
 }
 
-function renderDashboardMonthlyReport() {
-    const head = document.getElementById('dashboardMonthlyReportHead');
-    const body = document.getElementById('dashboardMonthlyReportBody');
-    if (!head || !body) return;
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-    const reportData = computeMonthlyReportData(year, month);
-    const monthLabel = new Date(year, month - 1).toLocaleString(currentLanguage, { month: 'long', year: 'numeric' });
-    const monthSpan = document.getElementById('dashboardMonthlyReportMonth');
-    if (monthSpan) monthSpan.textContent = monthLabel;
-    head.innerHTML = `<tr>
-        <th>#</th>
-        <th>Date</th>
-        <th>Day</th>
-        <th>Min (tons)</th>
-        <th>Finish (tons)</th>
-        <th>Target (tons)</th>
-        <th>Min Eff %</th>
-        <th>Finish Eff %</th>
-        <th>Cum. Min Eff %</th>
-        <th>Cum. Finish Eff %</th>
-        <th>Status</th>
-    </tr>`;
-    if (reportData.length === 0) {
-        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">No production data for this month</td></tr>`;
-    } else {
-        const rows = [];
-        reportData.forEach((row, idx) => {
-            const dayName = row.dateObj.toLocaleDateString(currentLanguage, { weekday: 'long' });
-            rows.push(`<tr>
-                <td class="text-center">${idx + 1}</td>
-                <td class="text-center">${row.date}</td>
-                <td class="text-center">${dayName}</td>
-                <td class="text-center">${row.minTons.toFixed(2)}</td>
-                <td class="text-center">${row.finTons.toFixed(2)}</td>
-                <td class="text-center">${22}</td>
-                <td class="text-center">${row.effMin.toFixed(1)}%</td>
-                <td class="text-center">${row.effFin.toFixed(1)}%</td>
-                <td class="text-center font-bold">${row.cumEffMin.toFixed(1)}%</td>
-                <td class="text-center font-bold">${row.cumEffFin.toFixed(1)}%</td>
-                <td class="text-center"><span class="badge ${row.statusClass}">${row.statusText}</span></td>
-            </tr>`);
-        });
-        const totalWorkingDays = reportData.filter(r => !r.isHoliday).length;
-        const totalCumMin = reportData.reduce((sum, r) => sum + r.minTons, 0);
-        const totalCumFin = reportData.reduce((sum, r) => sum + r.finTons, 0);
-        const overallMinEff = totalWorkingDays > 0 ? (totalCumMin / (totalWorkingDays * 22)) * 100 : 0;
-        const overallFinEff = totalWorkingDays > 0 ? (totalCumFin / (totalWorkingDays * 22)) * 100 : 0;
-        rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
-            <td class="text-center"></td>
-            <td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td>
-            <td class="text-center font-bold">${totalCumMin.toFixed(2)}</td>
-            <td class="text-center font-bold">${totalCumFin.toFixed(2)}</td>
-            <td class="text-center"></td>
-            <td class="text-center font-bold">${overallMinEff.toFixed(1)}%</td>
-            <td class="text-center font-bold">${overallFinEff.toFixed(1)}%</td>
-            <td class="text-center font-bold" colspan="2"></td>
-            <td class="text-center">Working Days: ${totalWorkingDays}</td>
-        </tr>`);
-        body.innerHTML = rows.join('');
-    }
-}
-
-// ====== Monthly Production Report function ======
+// ====== MONTHLY PRODUCTION REPORT (مع استبعاد اليوم الحالي) ======
 function computeMonthlyReportData(year, month) {
     const now = new Date();
-    const todayStr = getLocalDateStr(now);
     const isCurrentMonth = (now.getFullYear() === year && now.getMonth() === month - 1);
     const lastDay = new Date(year, month, 0);
     const daysInMonth = lastDay.getDate();
     let endDay = daysInMonth;
     if (isCurrentMonth) {
+        // لا نأخذ اليوم الحالي، نأخذ حتى الأمس فقط
         endDay = now.getDate() - 1;
-        if (endDay < 1) return [];
     }
+    // إذا كان endDay < 1، نعيد مصفوفة فارغة (لا توجد أيام مكتملة)
+    if (endDay < 1) return [];
+
     const days = [];
     for (let d = 1; d <= endDay; d++) {
         const dateObj = new Date(year, month - 1, d);
         const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         days.push({ dateStr, dateObj });
     }
+
     const targetTons = 22;
+    
+    // تجميع الإنتاج حسب التاريخ (لعمليات minimum و finish فقط)
     const prodByDate = new Map();
     productionDB.forEach(rec => {
         if (!rec.date) return;
@@ -2009,9 +1938,12 @@ function computeMonthlyReportData(year, month) {
         if (phase === 'minimum') entry.min += wt;
         else if (phase === 'finish') entry.fin += wt;
     });
+
     const reportData = [];
     let cumMin = 0, cumFin = 0;
+    let cumulativeTarget = 0;
     let workingDays = 0;
+
     for (const day of days) {
         const dateStr = day.dateStr;
         const dateObj = day.dateObj;
@@ -2024,13 +1956,15 @@ function computeMonthlyReportData(year, month) {
         let effMin = 0, effFin = 0;
         if (!isHoliday) {
             workingDays++;
+            cumulativeTarget += targetTons;
             effMin = targetTons > 0 ? (minTons / targetTons) * 100 : 0;
             effFin = targetTons > 0 ? (finTons / targetTons) * 100 : 0;
             cumMin += minTons;
             cumFin += finTons;
         }
-        const cumEffMin = workingDays > 0 ? (cumMin / (workingDays * targetTons)) * 100 : 0;
-        const cumEffFin = workingDays > 0 ? (cumFin / (workingDays * targetTons)) * 100 : 0;
+        // الكفاءة التراكمية = الإنتاج التراكمي / المستهدف التراكمي
+        const cumEffMin = cumulativeTarget > 0 ? (cumMin / cumulativeTarget) * 100 : 0;
+        const cumEffFin = cumulativeTarget > 0 ? (cumFin / cumulativeTarget) * 100 : 0;
         let statusText = '';
         if (isHoliday) {
             const baseHoliday = translations[currentLanguage].holiday || 'Holiday';
@@ -2056,7 +1990,8 @@ function computeMonthlyReportData(year, month) {
             statusClass: statusClass,
             workingDays: workingDays,
             cumMin: cumMin,
-            cumFin: cumFin
+            cumFin: cumFin,
+            cumulativeTarget: cumulativeTarget
         });
     }
     return reportData;
@@ -2076,7 +2011,7 @@ async function generateMonthlyProductionReport() {
     const body = document.getElementById('reportTableBody');
     header.innerHTML = `<tr><th>#</th><th>Date</th><th>Day</th><th>Min (tons)</th><th>Finish (tons)</th><th>Target (tons)</th><th>Min Eff %</th><th>Finish Eff %</th><th>Cum. Min Eff %</th><th>Cum. Finish Eff %</th><th>Status</th></tr>`;
     if (reportData.length === 0) {
-        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">No production data for this month</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">${translations[currentLanguage].noData || 'No production data for this month'}</td></tr>`;
     } else {
         const rows = [];
         reportData.forEach((row, idx) => {
@@ -2098,8 +2033,9 @@ async function generateMonthlyProductionReport() {
         const totalWorkingDays = reportData.filter(r => !r.isHoliday).length;
         const totalCumMin = reportData.reduce((sum, r) => sum + r.minTons, 0);
         const totalCumFin = reportData.reduce((sum, r) => sum + r.finTons, 0);
-        const overallMinEff = totalWorkingDays > 0 ? (totalCumMin / (totalWorkingDays * 22)) * 100 : 0;
-        const overallFinEff = totalWorkingDays > 0 ? (totalCumFin / (totalWorkingDays * 22)) * 100 : 0;
+        const totalCumTarget = totalWorkingDays * 22;
+        const overallMinEff = totalCumTarget > 0 ? (totalCumMin / totalCumTarget) * 100 : 0;
+        const overallFinEff = totalCumTarget > 0 ? (totalCumFin / totalCumTarget) * 100 : 0;
         rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
             <td class="text-center"></td>
             <td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td>
@@ -2116,6 +2052,72 @@ async function generateMonthlyProductionReport() {
     document.getElementById('reportResults').classList.remove('hidden');
     document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
     showToast('Monthly report generated', 'success');
+}
+
+// دالة renderDashboardMonthlyReport تستخدم computeMonthlyReportData مباشرة
+function renderDashboardMonthlyReport() {
+    const head = document.getElementById('dashboardMonthlyReportHead');
+    const body = document.getElementById('dashboardMonthlyReportBody');
+    if (!head || !body) return;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const reportData = computeMonthlyReportData(year, month);
+    const monthLabel = new Date(year, month - 1).toLocaleString(currentLanguage, { month: 'long', year: 'numeric' });
+    const monthSpan = document.getElementById('dashboardMonthlyReportMonth');
+    if (monthSpan) monthSpan.textContent = monthLabel;
+    head.innerHTML = `<tr>
+        <th>#</th>
+        <th>Date</th>
+        <th>Day</th>
+        <th>Min (tons)</th>
+        <th>Finish (tons)</th>
+        <th>Target (tons)</th>
+        <th>Min Eff %</th>
+        <th>Finish Eff %</th>
+        <th>Cum. Min Eff %</th>
+        <th>Cum. Finish Eff %</th>
+        <th>Status</th>
+    </tr>`;
+    if (reportData.length === 0) {
+        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">${translations[currentLanguage].noData || 'No production data for this month'}</td></tr>`;
+    } else {
+        const rows = [];
+        reportData.forEach((row, idx) => {
+            const dayName = row.dateObj.toLocaleDateString(currentLanguage, { weekday: 'long' });
+            rows.push(`<tr>
+                <td class="text-center">${idx + 1}</td>
+                <td class="text-center">${row.date}</td>
+                <td class="text-center">${dayName}</td>
+                <td class="text-center">${row.minTons.toFixed(2)}</td>
+                <td class="text-center">${row.finTons.toFixed(2)}</td>
+                <td class="text-center">${22}</td>
+                <td class="text-center">${row.effMin.toFixed(1)}%</td>
+                <td class="text-center">${row.effFin.toFixed(1)}%</td>
+                <td class="text-center font-bold">${row.cumEffMin.toFixed(1)}%</td>
+                <td class="text-center font-bold">${row.cumEffFin.toFixed(1)}%</td>
+                <td class="text-center"><span class="badge ${row.statusClass}">${row.statusText}</span></td>
+            </tr>`);
+        });
+        const totalWorkingDays = reportData.filter(r => !r.isHoliday).length;
+        const totalCumMin = reportData.reduce((sum, r) => sum + r.minTons, 0);
+        const totalCumFin = reportData.reduce((sum, r) => sum + r.finTons, 0);
+        const totalCumTarget = totalWorkingDays * 22;
+        const overallMinEff = totalCumTarget > 0 ? (totalCumMin / totalCumTarget) * 100 : 0;
+        const overallFinEff = totalCumTarget > 0 ? (totalCumFin / totalCumTarget) * 100 : 0;
+        rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
+            <td class="text-center"></td>
+            <td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td>
+            <td class="text-center font-bold">${totalCumMin.toFixed(2)}</td>
+            <td class="text-center font-bold">${totalCumFin.toFixed(2)}</td>
+            <td class="text-center"></td>
+            <td class="text-center font-bold">${overallMinEff.toFixed(1)}%</td>
+            <td class="text-center font-bold">${overallFinEff.toFixed(1)}%</td>
+            <td class="text-center font-bold" colspan="2"></td>
+            <td class="text-center">Working Days: ${totalWorkingDays}</td>
+        </tr>`);
+        body.innerHTML = rows.join('');
+    }
 }
 
 // ====== Populate Dropdowns ======
@@ -2167,7 +2169,6 @@ function populateProjectDropdown() {
 function populateDailyReportWorkOrders() {
     const sel = document.getElementById('dailyReportWorkOrder');
     if (sel) {
-        // Include archived orders
         sel.innerHTML = '<option value="">All Work Orders</option>';
         workOrdersDB.forEach(wo => { sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`; });
     }
@@ -2188,7 +2189,6 @@ function populateReportDropdowns() {
 function populateNCRWorkOrders() {
     const sel = document.getElementById('ncrWorkOrder');
     if (!sel) return;
-    // Include archived orders
     sel.innerHTML = '<option value="" disabled selected>Select work order...</option>';
     workOrdersDB.forEach(wo => {
         sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`;
@@ -2198,7 +2198,6 @@ function populateNCRWorkOrders() {
 function populateShortageWorkOrders() {
     const sel = document.getElementById('shortageWorkOrder');
     if (sel) {
-        // Include archived orders that are not completely finished
         sel.innerHTML = '<option value="">All Work Orders</option>';
         workOrdersDB.filter(wo => !isWorkOrderCompleted(wo)).forEach(wo => {
             sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`;
@@ -2232,7 +2231,6 @@ function populateWorkOrdersForOperation() {
     if (catContainer) catContainer.classList.remove('hidden');
     if (sel) {
         sel.innerHTML = '<option value="">All Work Orders</option>';
-        // Include archived orders
         let filtered = workOrdersDB;
         if (salesOrder) {
             filtered = filtered.filter(wo => wo.salesOrderNumber === salesOrder);
@@ -2263,7 +2261,6 @@ function renderModelsList() {
     });
 }
 
-// ====== MODIFIED: renderWorkOrdersList to show archived orders in Finished ======
 function renderWorkOrdersList() {
     const container = document.getElementById('workOrdersContainer');
     const search = document.getElementById('workOrderSearch').value.toLowerCase();
@@ -2272,7 +2269,6 @@ function renderWorkOrdersList() {
     if (currentWorkOrderFilter === 'inprogress') {
         filtered = workOrdersDB.filter(wo => !wo.items.every(i => i.status === 'Completed') && !wo.archived);
     } else if (currentWorkOrderFilter === 'finished') {
-        // عرض الأوامر المكتملة والأوامر المؤرشفة معاً
         filtered = workOrdersDB.filter(wo => wo.items.every(i => i.status === 'Completed') || wo.archived === true);
     }
     filtered = filtered.filter(wo =>
@@ -2302,7 +2298,6 @@ function renderWorkOrdersList() {
         const card = document.createElement('div');
         card.className = 'card cursor-pointer hover:shadow-lg transition';
         
-        // حساب الوزن الإجمالي للأمر
         let totalOrderWeight = 0;
         let completedOrderWeight = 0;
         wo.items.forEach(item => {
@@ -2363,7 +2358,6 @@ function renderWorkOrdersList() {
     });
 }
 
-// ====== NEW: markWorkOrderAsFinished (Admin only) ======
 async function markWorkOrderAsFinished(id) {
     if (!hasPermission('canMarkAsFinished')) {
         showToast('❌ غير مسموح لك بإنهاء أوامر العمل. هذه الصلاحية للمدير فقط.', 'error');
@@ -2384,7 +2378,6 @@ async function markWorkOrderAsFinished(id) {
     if (confirm(t.markAsFinishedConfirm || `Mark work order "${wo.workOrderName}" as Finished? (≥90% complete)\nIncomplete items will remain and can be completed later.`)) {
         wo.archived = true;
         await saveToServer('workOrdersDB', workOrdersDB);
-        // إنشاء سجلات إنتاج للأمر المنتهي
         await createProductionRecordsForArchivedOrders();
         renderWorkOrdersList();
         renderDashboard();
@@ -2398,7 +2391,6 @@ async function markWorkOrderAsFinished(id) {
     }
 }
 
-// ====== Work Order Details with Approve/Block ======
 function showWorkOrderDetails(id) {
     const wo = workOrdersDB.find(o => o.id === id);
     if (!wo) return;
@@ -2448,7 +2440,6 @@ function showWorkOrderDetails(id) {
     document.getElementById('workOrderDetailsView').scrollIntoView({ behavior: 'smooth' });
 }
 
-// ====== Approve / Block Functions ======
 async function approveItem(workOrderId, itemIndex) {
     if (!hasPermission('canApproveItem')) {
         showToast('غير مسموح لك باعتماد البنود', 'error');
@@ -2504,7 +2495,6 @@ async function blockItem(workOrderId, itemIndex) {
     showToast('تم حظر البند', 'success');
 }
 
-// ====== Complete Item as Balance ======
 async function completeItemAsBalance(workOrderId, itemIndex) {
     if (!hasPermission('canRecordProduction')) {
         showToast('غير مسموح لك بإكمال البند كـ Balance', 'error');
@@ -2630,7 +2620,6 @@ function hideDetails() { document.getElementById('detailsView').classList.add('h
 function hideProductionDetails() { document.getElementById('productionDetailsView').classList.add('hidden'); }
 function hideReportResults() { document.getElementById('reportResults').classList.add('hidden'); }
 
-// ====== Production Details ======
 function showProductionDetails(id) {
     const rec = productionDB.find(r => r.id === id);
     if (!rec) return;
@@ -2650,7 +2639,6 @@ function showProductionDetails(id) {
     document.getElementById('productionDetailsView').scrollIntoView({ behavior: 'smooth' });
 }
 
-// ====== File Handlers ======
 function handleFileSelect(e) {
     const file = e.target.files[0];
     const fn = document.getElementById('fileName');
@@ -2685,7 +2673,6 @@ function handleWorkOrderFileSelect(e) {
     }
 }
 
-// ====== Process Data (Models) ======
 async function processData() {
     if (!hasPermission('canCreateModel')) {
         showToast('غير مسموح لك بإضافة نماذج', 'error');
@@ -2725,7 +2712,6 @@ async function processData() {
     } catch (err) { hideLoading(); showToast('Error processing data', 'error'); console.error(err); }
 }
 
-// ====== Process Work Order ======
 async function processWorkOrder() {
     if (!hasPermission('canCreateWorkOrder')) {
         showToast('غير مسموح لك بإنشاء أوامر العمل', 'error');
@@ -2781,7 +2767,6 @@ async function processWorkOrder() {
     } catch (err) { hideLoading(); showToast('Error processing work order', 'error'); console.error(err); }
 }
 
-// ====== getMachineForOperation ======
 function getMachineForOperation(opName, section) {
     const op = opName.toString().trim().toLowerCase();
     const sect = section.toString().trim().toUpperCase();
@@ -3012,7 +2997,6 @@ function canMachineDoOperation(machine, opName, section) {
     return false;
 }
 
-// ====== Record Production ======
 async function recordProduction() {
     if (!hasPermission('canRecordProduction')) {
         showToast('غير مسموح لك بتسجيل الإنتاج', 'error');
@@ -3551,7 +3535,6 @@ function loadProductionPreferences() {
     }
 }
 
-// ====== Clear Production Form ======
 async function clearProductionForm() {
     if (confirm('Clear all fields?')) {
         document.getElementById('productionForm').reset();
@@ -3987,7 +3970,6 @@ async function generateItemsStatusReport() {
     const woValue = document.getElementById('reportWorkOrder') ? document.getElementById('reportWorkOrder').value : null;
     let selectedWOs = [];
     if (!woValue || woValue === 'all') {
-        // Include all work orders, including archived
         selectedWOs = workOrdersDB;
     } else {
         const wo = workOrdersDB.find(w => w.id === parseInt(woValue));
@@ -4239,7 +4221,6 @@ async function generateOperationStatusReport() {
         let totalReq = 0, totalWt = 0, totalComp = 0, totalRem = 0;
         const woIdInt = woId ? parseInt(woId) : null;
         workOrdersDB.forEach(wo => {
-            // Do not exclude archived orders
             if (woIdInt && wo.id !== woIdInt) return;
             if (salesOrder && wo.salesOrderNumber !== salesOrder) return;
             wo.items.forEach(it => {
@@ -4346,7 +4327,6 @@ function generateShortageReport() {
     const selectedId = woId ? parseInt(woId) : null;
     let shortages = [];
     workOrdersDB.forEach(wo => {
-        // Include archived orders as well
         if (selectedId && wo.id !== selectedId) return;
         wo.items.forEach(it => {
             const remaining = it.quantity - (it.completedQuantity || 0);
@@ -4577,7 +4557,6 @@ async function generateProjectStageSummary() {
     showLoading(translations[currentLanguage].processing || 'Processing...');
     await yieldToUI();
     try {
-        // Include archived orders
         const scope = workOrdersDB.filter(wo => (!salesOrderFilter || wo.salesOrderNumber === salesOrderFilter));
         const agg = computeStageSummary(scope);
         const scopeLabel = salesOrderFilter
@@ -4607,7 +4586,6 @@ async function generateMinimumStoppageReport() {
     showLoading(translations[currentLanguage].processing || 'Processing...');
     await yieldToUI();
     try {
-        // Include archived orders
         const scope = workOrdersDB.filter(wo => (!soFilter || wo.salesOrderNumber === soFilter));
         const rows = [];
         let totalQty = 0, totalWt = 0;

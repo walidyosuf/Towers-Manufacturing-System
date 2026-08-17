@@ -6,6 +6,8 @@
 // تم التعديل: إزالة رسائل toast الخاصة بعمليات الأرشفة
 // تم التعديل: تعديل حساب Cum. Min Eff % و Cum. Finish Eff % لتصبح كفاءة تراكمية
 // تم التعديل: إصلاح عرض التقرير الشهري بحيث لا يظهر اليوم الحالي (يقتصر على الأيام المكتملة حتى أمس)
+// تم التعديل: إضافة عمود Operations في تصدير Excel لتفاصيل أمر العمل (exportWorkOrderToExcel)
+// تم التعديل: إضافة عمود Section في تقرير Daily Production Report
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -4140,10 +4142,11 @@ function generateDailyProductionReport() {
             document.getElementById('reportTitle').textContent = 'Daily Production Report (' + from + ' to ' + to + ')';
             const header = document.getElementById('reportTableHeader');
             const body = document.getElementById('reportTableBody');
-            header.innerHTML = '<tr><th>#</th><th>Date</th><th>Shift</th><th>Work Order</th><th>Item Name</th><th>Operation</th><th>Machine</th><th>Operator</th><th>Quantity</th><th>Weight Produced</th></tr>';
+            // إضافة عمود Section بعد Item Name
+            header.innerHTML = '<tr><th>#</th><th>Date</th><th>Shift</th><th>Work Order</th><th>Item Name</th><th>Section</th><th>Operation</th><th>Machine</th><th>Operator</th><th>Quantity</th><th>Weight Produced</th></tr>';
             let html = '';
             if (filtered.length === 0) {
-                html = '<tr><td colspan="10" class="text-center py-4">No production records found</td></tr>';
+                html = '<tr><td colspan="11" class="text-center py-4">No production records found</td></tr>';
             } else {
                 let totalQty = 0, totalWt = 0;
                 for (let i = 0; i < filtered.length; i++) {
@@ -4157,6 +4160,7 @@ function generateDailyProductionReport() {
                         '<td class="text-center">' + r.shift + '</td>' +
                         '<td class="text-center">' + r.workOrderName + '</td>' +
                         '<td class="font-bold">' + r.itemName + '</td>' +
+                        '<td class="text-center">' + (r.itemSection || '-') + '</td>' +
                         '<td class="text-center">' + r.operation + '</td>' +
                         '<td class="text-center">' + r.machine + '</td>' +
                         '<td class="text-center">' + (r.operator || '-') + '</td>' +
@@ -4165,7 +4169,7 @@ function generateDailyProductionReport() {
                         '</tr>';
                 }
                 html += '<tr class="total-row">' +
-                    '<td colspan="8" class="font-bold text-right">Totals:</td>' +
+                    '<td colspan="9" class="font-bold text-right">Totals:</td>' +
                     '<td class="font-bold text-purple-700">' + totalQty + '</td>' +
                     '<td class="font-bold text-green-700">' + totalWt.toFixed(2) + ' kg</td>' +
                     '</tr>';
@@ -4708,10 +4712,35 @@ function exportWorkOrderToExcel() {
     data.push(['Model:', currentWorkOrder.model]);
     data.push(['Creation Date:', currentWorkOrder.date]);
     data.push([]);
-    data.push(['#', 'Item Name', 'Section', 'Steel Grade', 'Length', 'Quantity', 'Weight/Piece', 'Total Weight', 'Completed', 'Remaining', 'Status']);
+    // إضافة عمود Operations بين Total Weight و Completed
+    data.push(['#', 'Item Name', 'Section', 'Steel Grade', 'Length', 'Quantity', 'Weight/Piece', 'Total Weight', 'Operations', 'Completed', 'Remaining', 'Status']);
+    
     currentWorkOrder.items.forEach((it, idx) => {
-        data.push([idx + 1, it.itemName, it.section, it.steelGrade || '-', it.length || '-', it.quantity, it.weightPerPiece || 0, it.totalWeight || 0, it.completedQuantity || 0, it.quantity - (it.completedQuantity || 0), it.status]);
+        // بناء نص العمليات لكل بند
+        let opsText = '';
+        if (it.operations && it.operations.length) {
+            opsText = it.operations.map(op => {
+                const comp = it.completedOperations && it.completedOperations[op.name];
+                const compQty = comp ? comp.completedQuantity : 0;
+                return `${op.name} (${compQty}/${it.quantity})`;
+            }).join('; ');
+        }
+        data.push([
+            idx + 1,
+            it.itemName,
+            it.section,
+            it.steelGrade || '-',
+            it.length || '-',
+            it.quantity,
+            it.weightPerPiece || 0,
+            it.totalWeight || 0,
+            opsText,
+            it.completedQuantity || 0,
+            it.quantity - (it.completedQuantity || 0),
+            it.status
+        ]);
     });
+    
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Work Order');

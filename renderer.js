@@ -8,6 +8,8 @@
 // تم التعديل: إصلاح عرض التقرير الشهري بحيث لا يظهر اليوم الحالي (يقتصر على الأيام المكتملة حتى أمس)
 // تم التعديل: إضافة عمود Operations في تصدير Excel لتفاصيل أمر العمل (exportWorkOrderToExcel)
 // تم التعديل: إضافة عمود Section في تقرير Daily Production Report
+// تم التعديل: تحسين دالة recordProduction لحفظ workOrdersDB أولاً وإلغاء المعالجة الخاصة بـ Shear
+// تم التعديل: إضافة console.log لتتبع عملية الحفظ وتحديث البيانات
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -525,12 +527,14 @@ function getYesterdayDateStr() {
 
 async function saveToServer(dataType, data) {
     if (!dataReady) {
+        console.warn('⛔ saveToServer called while dataReady=false');
         showToast('⛔ الحفظ معطّل: لم يتم تحميل البيانات من الخادم بعد.', 'error');
         return { success: false, error: 'data not loaded' };
     }
     lastSavePayload[dataType] = JSON.stringify(data);
     unconfirmedTypes.add(dataType);
     pendingSaves++;
+    console.log(`💾 saveToServer: sending ${dataType} (size: ${lastSavePayload[dataType].length} bytes)`);
     try {
         const response = await fetch(`${SERVER_URL}/api/data/${dataType}`, {
             method: 'POST',
@@ -540,13 +544,15 @@ async function saveToServer(dataType, data) {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         if (!result.success) {
+            console.error(`❌ saveToServer failed for ${dataType}:`, result.error);
             showToast('Error saving data: ' + (result.error || 'Unknown error'), 'error');
         } else {
+            console.log(`✅ saveToServer succeeded for ${dataType}`);
             unconfirmedTypes.delete(dataType);
         }
         return result;
     } catch (error) {
-        console.error('Error saving to server:', error);
+        console.error(`❌ saveToServer error for ${dataType}:`, error);
         showToast('Error connecting to server: ' + error.message, 'error');
         return { success: false, error: error.message };
     } finally {
@@ -617,6 +623,7 @@ async function flushNewProductionRecords() {
     }
     const pending = productionDB.filter(r => !syncedRecordIds.has(r.id));
     if (pending.length === 0) return { success: true, inserted: 0 };
+    console.log(`💾 flushNewProductionRecords: sending ${pending.length} records`);
     try {
         const response = await fetch(`${SERVER_URL}/api/production`, {
             method: 'POST',
@@ -786,6 +793,7 @@ async function loadData() {
         employeesDB = await loadFromServer('employeesDB');
         await loadUsers();
         dataReady = true;
+        console.log('✅ Data loaded from server successfully');
     } catch (error) {
         console.error('Error loading data:', error);
         dataReady = false;
@@ -2999,11 +3007,16 @@ function canMachineDoOperation(machine, opName, section) {
     return false;
 }
 
+// ============= UPDATED recordProduction with console.log =============
 async function recordProduction() {
+    console.log('🔵 [recordProduction] بدء تسجيل الإنتاج');
     if (!hasPermission('canRecordProduction')) {
+        console.warn('⛔ [recordProduction] لا صلاحية للتسجيل');
         showToast('غير مسموح لك بتسجيل الإنتاج', 'error');
         return;
     }
+
+    // قراءة الحقول
     const towerType = document.getElementById('productionTowerType').value;
     const model = document.getElementById('productionModel').value;
     const woId = document.getElementById('productionWorkOrder').value;
@@ -3015,173 +3028,173 @@ async function recordProduction() {
     const rejectedQty = parseInt(document.getElementById('productionRejectedQty').value) || 0;
     const notes = document.getElementById('productionNotes').value;
     const selectedIdx = document.getElementById('availableItemsSelect').value;
+
+    console.log('📋 [recordProduction] البيانات المدخلة:', {
+        towerType, model, woId, shift, machine, operator, date, quantity, rejectedQty, selectedIdx
+    });
+
+    // التحقق من الحقول المطلوبة
     if (!towerType || !model || !woId || !shift || !machine || !date || !operator) {
-        showToast('Please fill all required fields', 'warning');
+        console.warn('⚠️ [recordProduction] حقول مفقودة');
+        showToast('يرجى ملء جميع الحقول المطلوبة', 'warning');
         return;
     }
     if (selectedIdx === '') {
-        showToast('Please select item', 'warning');
+        console.warn('⚠️ [recordProduction] لم يتم اختيار البند');
+        showToast('يرجى اختيار البند', 'warning');
         return;
     }
     if (rejectedQty > quantity) {
-        showToast('Rejected quantity cannot exceed produced quantity', 'warning');
+        console.warn('⚠️ [recordProduction] الكمية المعيبة > المنتجة');
+        showToast('الكمية المعيبة لا يمكن أن تتجاوز الكمية المنتجة', 'warning');
         return;
     }
+
+    // البحث عن أمر العمل والبند
     const wo = workOrdersDB.find(w => w.id === parseInt(woId));
-    if (!wo) { showToast('Work order not found', 'error'); return; }
+    if (!wo) {
+        console.error('❌ [recordProduction] أمر العمل غير موجود:', woId);
+        showToast('أمر العمل غير موجود', 'error');
+        return;
+    }
     const item = wo.items[parseInt(selectedIdx)];
+    if (!item) {
+        console.error('❌ [recordProduction] البند غير موجود في أمر العمل');
+        showToast('البند غير موجود', 'error');
+        return;
+    }
     const selOpt = document.getElementById('availableItemsSelect').selectedOptions[0];
     const opName = selOpt.getAttribute('data-operation');
-    const isSheet = item.section.toString().trim().toUpperCase().startsWith('P') || item.section.toString().trim().toUpperCase().startsWith('F');
-    const balanceModeActive = balanceMode && machine === 'Finishing';
-    let finalOperator = operator;
-    if (balanceModeActive) {
-        finalOperator = "Balance";
-        const finishingOp = item.operations.find(op => getOperationPhase(op.name) === 'finish');
-        if (finishingOp) {
-            const finishIndex = item.operations.findIndex(op => op.name === finishingOp.name);
-            let anyPrevCompleted = false;
-            for (let i = 0; i < finishIndex; i++) {
-                const prevOp = item.operations[i];
-                const prevComp = item.completedOperations[prevOp.name] ? item.completedOperations[prevOp.name].completedQuantity : 0;
-                if (prevComp < item.quantity) {
-                    const remainingPrev = item.quantity - prevComp;
-                    if (remainingPrev > 0) {
-                        const prevMachineInfo = getMachineForOperation(prevOp.name, item.section);
-                        let prevMachine = prevMachineInfo.machine;
-                        if (prevMachine === "206/20.20/10.10") {
-                            prevMachine = "206";
-                        }
-                        const goodQuantityPrev = remainingPrev;
-                        const prevProdWeight = Math.round(item.weightPerPiece * goodQuantityPrev);
-                        const prevProdRec = {
-                            id: Date.now() + Math.random(),
-                            workOrderId: parseInt(woId),
-                            workOrderName: wo.workOrderName,
-                            projectName: wo.projectName,
-                            towerType, model, shift,
-                            machine: prevMachine,
-                            operator: "Balance",
-                            date,
-                            itemName: item.itemName,
-                            itemSection: item.section,
-                            operation: prevOp.name,
-                            quantity: remainingPrev,
-                            rejectedQty: 0,
-                            producedWeight: prevProdWeight,
-                            weightPerPiece: item.weightPerPiece,
-                            totalItemWeight: item.totalWeight,
-                            notes: "Auto-completed by Balance mode",
-                            timestamp: Date.now(),
-                            recordedBy: currentUser ? currentUser.username : 'system'
-                        };
-                        productionDB.push(prevProdRec);
-                        if (!item.completedOperations[prevOp.name]) {
-                            item.completedOperations[prevOp.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
-                        }
-                        item.completedOperations[prevOp.name].completedQuantity = item.quantity;
-                        item.completedOperations[prevOp.name].completed = true;
-                        anyPrevCompleted = true;
-                    }
-                }
-            }
-            if (anyPrevCompleted) {
-                await flushNewProductionRecords();
-                await saveToServer('workOrdersDB', workOrdersDB);
-                showToast(`Previous operations completed automatically by Balance mode`, 'info');
-            }
-        }
+    if (!opName) {
+        console.error('❌ [recordProduction] اسم العملية غير موجود في الخيار المختار');
+        showToast('اسم العملية غير صحيح', 'error');
+        return;
     }
-    if (isSheet && machine === "Shear") {
-        const shearOp = item.operations.find(op => op.name.toLowerCase().includes('shear') || op.name.toLowerCase().includes('cutting'));
-        const cropOp = item.operations.find(op => op.name.toLowerCase().includes('crop'));
-        if (shearOp) {
-            const name = shearOp.name;
-            if (!item.completedOperations[name]) item.completedOperations[name] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
-            else { item.completedOperations[name].completedQuantity += quantity; if (item.completedOperations[name].completedQuantity >= item.quantity) item.completedOperations[name].completed = true; }
-        }
-        if (cropOp) {
-            const name = cropOp.name;
-            if (!item.completedOperations[name]) item.completedOperations[name] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
-            else { item.completedOperations[name].completedQuantity += quantity; if (item.completedOperations[name].completedQuantity >= item.quantity) item.completedOperations[name].completed = true; }
-            const goodQuantity = quantity - rejectedQty;
-            const prodWeight = Math.round(item.weightPerPiece * goodQuantity);
-            productionDB.push({ 
-                id: Date.now() + 1, 
-                workOrderId: parseInt(woId), 
-                workOrderName: wo.workOrderName, 
-                projectName: wo.projectName, 
-                towerType, model, shift, 
-                machine: "Shear", 
-                operator: finalOperator, 
-                date, 
-                itemName: item.itemName, 
-                itemSection: item.section, 
-                operation: name, 
-                quantity, 
-                rejectedQty, 
-                producedWeight: prodWeight, 
-                weightPerPiece: item.weightPerPiece, 
-                totalItemWeight: item.totalWeight, 
-                notes: notes + (balanceModeActive ? " (Balance mode)" : ""), 
-                timestamp: Date.now(),
-                recordedBy: currentUser ? currentUser.username : 'system'
-            });
-        }
-    } else {
-        const already = item.completedOperations[opName] ? item.completedOperations[opName].completedQuantity : 0;
-        const remaining = item.quantity - already;
-        if (quantity > remaining) { showToast(`Quantity exceeds remaining (${remaining})`, 'warning'); return; }
-        if (!item.completedOperations[opName]) item.completedOperations[opName] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
-        else { item.completedOperations[opName].completedQuantity += quantity; if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true; }
-    }
+
+    console.log('🔄 [recordProduction] البند:', item.itemName, ' العملية:', opName);
+
+    // التأكد من وجود العملية في البند
     const opIndex = item.operations.findIndex(op => op.name === opName);
-    if (opIndex === item.operations.length - 1) item.completedQuantity = (item.completedQuantity || 0) + quantity;
+    if (opIndex === -1) {
+        console.error('❌ [recordProduction] العملية غير موجودة في البند:', opName);
+        showToast(`العملية "${opName}" غير موجودة في هذا البند`, 'error');
+        return;
+    }
+
+    // التحقق من الكمية المتبقية للعملية المحددة
+    const already = item.completedOperations[opName] ? item.completedOperations[opName].completedQuantity : 0;
+    const remaining = item.quantity - already;
+    if (quantity > remaining) {
+        console.warn(`⚠️ [recordProduction] الكمية ${quantity} > المتبقي ${remaining}`);
+        showToast(`الكمية المطلوبة (${quantity}) تتجاوز المتبقي (${remaining})`, 'warning');
+        return;
+    }
+
+    // --- تحديث workOrdersDB محلياً ---
+    // تحديث completedOperations للعملية المحددة
+    if (!item.completedOperations[opName]) {
+        item.completedOperations[opName] = {
+            completed: false,
+            completedQuantity: quantity,
+            totalRequired: item.quantity
+        };
+    } else {
+        item.completedOperations[opName].completedQuantity += quantity;
+        if (item.completedOperations[opName].completedQuantity >= item.quantity) {
+            item.completedOperations[opName].completed = true;
+        }
+    }
+
+    // حساب completedQuantity للبند كحد أدنى للكميات المكتملة عبر العمليات
+    let minCompleted = Infinity;
     let allComplete = true;
-    item.operations.forEach(op => { if (!item.completedOperations[op.name] || item.completedOperations[op.name].completedQuantity < item.quantity) allComplete = false; });
-    if (allComplete && item.completedQuantity >= item.quantity) item.status = 'Completed';
-    else item.status = 'In Progress';
+    item.operations.forEach(op => {
+        const comp = item.completedOperations[op.name];
+        const qty = comp ? comp.completedQuantity : 0;
+        if (qty < item.quantity) allComplete = false;
+        if (qty < minCompleted) minCompleted = qty;
+    });
+    item.completedQuantity = (minCompleted === Infinity) ? 0 : minCompleted;
+    item.status = allComplete ? 'Completed' : 'In Progress';
+
+    console.log('🔄 [recordProduction] بعد التحديث المحلي: completedQuantity=', item.completedQuantity, ' status=', item.status);
+    console.log('🔄 [recordProduction] completedOperations:', item.completedOperations);
+
+    // تحديث مؤشر البند في workOrdersDB
     const woIndex = workOrdersDB.findIndex(w => w.id === parseInt(woId));
     workOrdersDB[woIndex] = wo;
-    await saveToServer('workOrdersDB', workOrdersDB);
+
+    // --- حفظ workOrdersDB أولاً ---
+    console.log('💾 [recordProduction] محاولة حفظ workOrdersDB على الخادم...');
+    try {
+        const saveResult = await saveToServer('workOrdersDB', workOrdersDB);
+        if (!saveResult.success) {
+            console.error('❌ [recordProduction] فشل حفظ workOrdersDB:', saveResult.error);
+            showToast('فشل حفظ أمر العمل، لم يتم تسجيل الإنتاج', 'error');
+            return; // نخرج دون إضافة سجل productionDB
+        }
+        console.log('✅ [recordProduction] تم حفظ workOrdersDB بنجاح');
+    } catch (err) {
+        console.error('❌ [recordProduction] استثناء أثناء حفظ workOrdersDB:', err);
+        showToast('فشل حفظ أمر العمل، لم يتم تسجيل الإنتاج', 'error');
+        return;
+    }
+
+    // --- بعد نجاح حفظ workOrdersDB، نضيف سجل productionDB ---
     const goodQuantity = quantity - rejectedQty;
     const prodWeight = Math.round(item.weightPerPiece * goodQuantity);
-    const prodRec = { 
-        id: Date.now(), 
-        workOrderId: parseInt(woId), 
-        workOrderName: wo.workOrderName, 
-        projectName: wo.projectName, 
-        towerType, model, shift, 
-        machine, 
-        operator: finalOperator, 
-        date, 
-        itemName: item.itemName, 
-        itemSection: item.section, 
-        operation: opName, 
-        quantity, 
-        rejectedQty, 
-        producedWeight: prodWeight, 
-        weightPerPiece: item.weightPerPiece, 
-        totalItemWeight: item.totalWeight, 
-        notes: notes + (balanceModeActive ? " (Balance mode)" : ""), 
+    const prodRec = {
+        id: Date.now(),
+        workOrderId: parseInt(woId),
+        workOrderName: wo.workOrderName,
+        projectName: wo.projectName,
+        towerType,
+        model,
+        shift,
+        machine,
+        operator,
+        date,
+        itemName: item.itemName,
+        itemSection: item.section,
+        operation: opName,
+        quantity,
+        rejectedQty,
+        producedWeight: prodWeight,
+        weightPerPiece: item.weightPerPiece,
+        totalItemWeight: item.totalWeight,
+        notes: notes,
         timestamp: Date.now(),
         recordedBy: currentUser ? currentUser.username : 'system'
     };
     productionDB.push(prodRec);
+    console.log('📝 [recordProduction] تم إضافة سجل الإنتاج:', prodRec);
+
+    // حفظ سجلات الإنتاج
+    console.log('💾 [recordProduction] حفظ سجلات الإنتاج...');
     await flushNewProductionRecords();
-    await saveProductionPreferences();
-    document.getElementById('availableItemsSelect').innerHTML = '<option disabled selected>Select item...</option>';
+    console.log('✅ [recordProduction] تم حفظ سجلات الإنتاج');
+
+    // تنظيف الواجهة
+    document.getElementById('availableItemsSelect').innerHTML = '<option disabled selected>اختر البند...</option>';
     document.getElementById('itemSearchInput').value = '';
     document.getElementById('itemDetails').classList.add('hidden');
     document.getElementById('quantityWarning').classList.add('hidden');
     document.getElementById('productionQuantity').value = 1;
     document.getElementById('productionRejectedQty').value = 0;
     document.getElementById('productionNotes').value = '';
+
+    // تحديث القوائم والتقارير
     setTimeout(() => loadAvailableItems(), 100);
-    updateStats(); renderProductionList(); renderWorkOrdersList(); renderDashboard();
+    updateStats();
+    renderProductionList();
+    renderWorkOrdersList();
+    renderDashboard();
     await updateIdealRatesFromActual();
-    showToast(translations[currentLanguage].productionRecorded || 'Production recorded successfully', 'success');
+
+    showToast('تم تسجيل الإنتاج بنجاح', 'success');
+    console.log('✅ [recordProduction] انتهى تسجيل الإنتاج بنجاح');
 }
+// ====== End of recordProduction update ======
 
 // ====== Downtime ======
 function calculateDowntimeDuration() {

@@ -1,8 +1,10 @@
-// renderer.js - Tower Manufacturing Management System v2.2.4
+// renderer.js - Tower Manufacturing Management System v2.2.8
+// تم التعديل: عند تسجيل إنتاج لعملية من نوع finish، يتم إكمال جميع العمليات السابقة تلقائياً مع Balance
 // تم التعديل: إصلاح Balance Mode بحيث يكمل جميع العمليات السابقة للعملية المحددة
 // تم التعديل: زر "اعتماد" (approveItem) يكمل البند بالكامل مع Balance بتاريخ اليوم
 // تم التعديل: صلاحية approveItem و blockItem متاحة فقط للمدير (administrator)
 // تم التعديل: إضافة حقلي بحث في تقارير Items Status و Detailed Item لتصفية أوامر العمل
+// تم التعديل: في تقرير Detailed Item Report، إظهار الطول في عنوان التقرير بعد القطاع، وإزالة عمودي الطول والقطاع من الجدول
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -39,7 +41,7 @@ const STATUS = {
 };
 
 let appConfig = {
-    version: '2.2.4',
+    version: '2.2.8',
     settings: {},
     lastBackup: null,
     backupSchedule: 'none'
@@ -3227,7 +3229,7 @@ function canMachineDoOperation(machine, opName, section) {
     return false;
 }
 
-// ====== recordProduction مع إصلاح Balance Mode ======
+// ====== recordProduction مع إصلاح Balance Mode وإكمال العمليات السابقة عند Finish ======
 async function recordProduction() {
     if (!hasPermission('canRecordProduction')) {
         showToast('غير مسموح لك بتسجيل الإنتاج', 'error');
@@ -3262,11 +3264,15 @@ async function recordProduction() {
     const selOpt = document.getElementById('availableItemsSelect').selectedOptions[0];
     const opName = selOpt.getAttribute('data-operation');
     const isSheet = item.section.toString().trim().toUpperCase().startsWith('P') || item.section.toString().trim().toUpperCase().startsWith('F');
+    
+    // === التعديل الجديد: إكمال العمليات السابقة إذا كانت العملية Finish أو إذا كان Balance Mode مفعلاً ===
     const balanceModeActive = balanceMode && machine === 'Finishing';
+    const isFinishOperation = getOperationPhase(opName) === 'finish';
+    const shouldCompletePrevious = balanceModeActive || isFinishOperation;
+
     let finalOperator = operator;
-    if (balanceModeActive) {
-        finalOperator = "Balance";
-        // نستخدم العملية المحددة (opName) بدلاً من البحث عن أول finish
+
+    if (shouldCompletePrevious) {
         const currentOpIndex = item.operations.findIndex(op => op.name === opName);
         if (currentOpIndex > 0) {
             let anyPrevCompleted = false;
@@ -3300,7 +3306,7 @@ async function recordProduction() {
                             producedWeight: prevProdWeight,
                             weightPerPiece: item.weightPerPiece,
                             totalItemWeight: item.totalWeight,
-                            notes: "Auto-completed by Balance mode",
+                            notes: (balanceModeActive ? "Auto-completed by Balance mode" : "Auto-completed because operation is finish"),
                             timestamp: Date.now(),
                             recordedBy: currentUser ? currentUser.username : 'system'
                         };
@@ -3318,13 +3324,16 @@ async function recordProduction() {
                 const prevFlush = await flushNewProductionRecords();
                 const prevSave = await saveToServer('workOrdersDB', workOrdersDB);
                 if (!prevFlush || !prevFlush.success || !prevSave || !prevSave.success) {
-                    showToast('تعذّر حفظ إكمال العمليات السابقة تلقائيًا (Balance mode) على الخادم، تحقق من الاتصال وأعد المحاولة', 'error');
+                    showToast('تعذّر حفظ إكمال العمليات السابقة تلقائيًا على الخادم، تحقق من الاتصال وأعد المحاولة', 'error');
                     return;
                 }
-                showToast(`تم إكمال العمليات السابقة تلقائياً بواسطة Balance`, 'info');
+                const msg = balanceModeActive ? 'تم إكمال العمليات السابقة تلقائياً بواسطة Balance' : 'تم إكمال العمليات السابقة تلقائياً لأن العملية من نوع finish';
+                showToast(msg, 'info');
             }
         }
     }
+
+    // === استكمال تسجيل الإنتاج للعملية الحالية ===
     if (isSheet && machine === "Shear") {
         if (!item.completedOperations[opName]) item.completedOperations[opName] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
         else { item.completedOperations[opName].completedQuantity += quantity; if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true; }
@@ -3340,6 +3349,7 @@ async function recordProduction() {
         if (!item.completedOperations[opName]) item.completedOperations[opName] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
         else { item.completedOperations[opName].completedQuantity += quantity; if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true; }
     }
+    
     // إعادة حساب completedQuantity الإجمالي للبند
     let totalCompleted = 0;
     item.operations.forEach(op => {
@@ -3352,6 +3362,7 @@ async function recordProduction() {
     item.operations.forEach(op => { if (!item.completedOperations[op.name] || item.completedOperations[op.name].completedQuantity < item.quantity) allComplete = false; });
     if (allComplete && item.completedQuantity >= item.quantity) item.status = 'Completed';
     else item.status = 'In Progress';
+    
     const woIndex = workOrdersDB.findIndex(w => w.id === parseInt(woId));
     workOrdersDB[woIndex] = wo;
     const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
@@ -4460,6 +4471,7 @@ async function generateItemsStatusReport() {
     }
 }
 
+// ====== تعديل generateDetailedItemReport: إضافة Length في العنوان، وإزالة عمودي Length و Section من الجدول ======
 async function generateDetailedItemReport() {
     if (!hasPermission('canViewReports')) {
         showToast('غير مسموح لك بعرض التقارير', 'error');
@@ -4471,10 +4483,27 @@ async function generateDetailedItemReport() {
     const wo = workOrdersDB.find(w => w.id === parseInt(woId));
     if (!wo || !wo.items[itemIdx]) { showToast('Item not found', 'error'); return; }
     const item = wo.items[itemIdx];
-    document.getElementById('reportTitle').textContent = `Detailed Item Report - ${item.itemName}`;
+    
+    // عرض العنوان مع القطاع والطول بين قوسين
+    const sectionDisplay = item.section || '-';
+    const lengthDisplay = item.length || '-';
+    document.getElementById('reportTitle').textContent = `Detailed Item Report - ${item.itemName} (${sectionDisplay}, Length: ${lengthDisplay})`;
+    
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
-    header.innerHTML = `<tr><th>#</th><th>Operation</th><th>Machine</th><th>Required</th><th>Completed</th><th>Remaining</th><th>Status</th><th>Production Records</th></tr>`;
+    
+    // ✅ إزالة عمودي Length و Section من الجدول
+    header.innerHTML = `<tr>
+        <th>#</th>
+        <th>Operation</th>
+        <th>Machine</th>
+        <th>Required</th>
+        <th>Completed</th>
+        <th>Remaining</th>
+        <th>Status</th>
+        <th>Production Records</th>
+    </tr>`;
+    
     const prodRecords = productionDB.filter(r => r.workOrderId === parseInt(woId) && r.itemName === item.itemName);
     const recordsByOp = new Map();
     for (const r of prodRecords) {
@@ -4492,9 +4521,27 @@ async function generateDetailedItemReport() {
         if (!recHtml) recHtml = '<div class="text-xs text-gray-500 p-1">No production records</div>';
         const statusClass = isComp ? 'status-completed' : (compQty > 0 ? 'status-in-progress' : 'status-pending');
         const statusText = isComp ? 'Completed' : (compQty > 0 ? 'In Progress' : 'Pending');
-        rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="font-bold">${op.name}</td><td class="text-center">${op.machine}</td><td class="text-center">${item.quantity}</td><td class="text-center">${compQty}</td><td class="text-center">${item.quantity - compQty}</td><td class="text-center"><span class="status-indicator ${statusClass}">${statusText}</span></td><td class="text-center">${recHtml}</td></tr>`);
+        rows.push(`<tr>
+            <td class="text-center">${idx + 1}</td>
+            <td class="font-bold">${op.name}</td>
+            <td class="text-center">${op.machine}</td>
+            <td class="text-center">${item.quantity}</td>
+            <td class="text-center">${compQty}</td>
+            <td class="text-center">${item.quantity - compQty}</td>
+            <td class="text-center"><span class="status-indicator ${statusClass}">${statusText}</span></td>
+            <td class="text-center">${recHtml}</td>
+        </tr>`);
     });
-    rows.push(`<tr class="summary-row"><td colspan="3" class="font-bold text-center">Item Summary</td><td class="font-bold text-center">${item.quantity}</td><td class="font-bold text-center">${item.completedQuantity || 0}</td><td class="font-bold text-center">${item.quantity - (item.completedQuantity || 0)}</td><td class="font-bold text-center">${item.status}</td><td class="font-bold text-center">Total Production Records: ${prodRecords.length}</td></tr>`);
+    rows.push(`<tr class="summary-row">
+        <td class="text-center"></td>
+        <td class="font-bold text-center">Item Summary</td>
+        <td class="text-center">—</td>
+        <td class="font-bold text-center">${item.quantity}</td>
+        <td class="font-bold text-center">${item.completedQuantity || 0}</td>
+        <td class="font-bold text-center">${item.quantity - (item.completedQuantity || 0)}</td>
+        <td class="font-bold text-center">${item.status}</td>
+        <td class="font-bold text-center">Total Production Records: ${prodRecords.length}</td>
+    </tr>`);
     body.innerHTML = rows.join('');
     document.getElementById('reportResults').classList.remove('hidden');
     document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });

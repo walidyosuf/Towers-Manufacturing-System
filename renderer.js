@@ -5,6 +5,7 @@
 // تم التعديل: صلاحية approveItem و blockItem متاحة فقط للمدير (administrator)
 // تم التعديل: إضافة حقلي بحث في تقارير Items Status و Detailed Item لتصفية أوامر العمل
 // تم التعديل: في تقرير Detailed Item Report، إظهار الطول في عنوان التقرير بعد القطاع، وإزالة عمودي الطول والقطاع من الجدول
+// تم التعديل: إضافة عمود Sales Order في تقرير WIP After Minimum
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -1093,6 +1094,7 @@ const translations = {
         allSalesOrders: "All Sales Orders ",
         minStoppageReport: "WIP After Minimum",
         minStoppageDesc: "Items that completed Minimum and are still WIP in later stages",
+        stoppedAtStage: "Stopped At Stage",
         welcome: "Welcome to Tower Manufacturing Management System! ",
         backupCreated: "Backup created successfully ",
         dataRestored: "Data restored successfully ",
@@ -5024,6 +5026,7 @@ async function generateProjectStageSummary() {
     }
 }
 
+// ====== generateMinimumStoppageReport - تم إضافة عمود Sales Order ======
 async function generateMinimumStoppageReport() {
     if (!hasPermission('canViewReports')) {
         showToast('غير مسموح لك بعرض التقارير', 'error');
@@ -5071,6 +5074,7 @@ async function generateMinimumStoppageReport() {
                 if (section.startsWith('L')) categoryLabel = 'Angle';
                 else if (section.startsWith('P') || section.startsWith('F')) categoryLabel = 'Plate';
                 rows.push({
+                    salesOrder: wo.salesOrderNumber || '-',
                     woName: wo.workOrderName,
                     itemName: item.itemName,
                     section: item.section || '-',
@@ -5094,6 +5098,7 @@ async function generateMinimumStoppageReport() {
         const body = document.getElementById('reportTableBody');
         header.innerHTML = `<tr>
             <th>#</th>
+            <th>Sales Order</th>
             <th>Work Order</th>
             <th>Item Name</th>
             <th>Section</th>
@@ -5105,11 +5110,12 @@ async function generateMinimumStoppageReport() {
             <th>Stage Progress</th>
         </tr>`;
         if (rows.length === 0) {
-            body.innerHTML = '<tr><td colspan="10" class="text-center py-4">No items found — no items have completed Minimum while still pending a later stage.</td></tr>';
+            body.innerHTML = '<tr><td colspan="11" class="text-center py-4">No items found — no items have completed Minimum while still pending a later stage.</td></tr>';
         } else {
             const fmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
             const out = rows.map((r, i) => `<tr>
                 <td class="text-center">${i + 1}</td>
+                <td class="text-center">${esc(r.salesOrder)}</td>
                 <td class="text-center">${esc(r.woName)}</td>
                 <td class="font-bold">${esc(r.itemName)}</td>
                 <td class="text-center">${esc(r.section)}</td>
@@ -5121,6 +5127,7 @@ async function generateMinimumStoppageReport() {
                 <td class="text-center">${fmtInt(r.stuckDone)} / ${fmtInt(r.qty)}</td>
             </tr>`);
             out.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
+                <td class="text-center"></td>
                 <td class="text-center"></td>
                 <td class="text-center font-bold">TOTAL</td>
                 <td class="text-center font-bold">${fmtInt(rows.length)} item(s)</td>

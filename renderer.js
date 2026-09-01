@@ -6,6 +6,7 @@
 // تم التعديل: إضافة حقلي بحث في تقارير Items Status و Detailed Item لتصفية أوامر العمل
 // تم التعديل: في تقرير Detailed Item Report، إظهار الطول في عنوان التقرير بعد القطاع، وإزالة عمودي الطول والقطاع من الجدول
 // تم التعديل: إضافة عمود Sales Order في تقرير WIP After Minimum
+// تم التعديل: إظهار رقم أمر الشغل ورقم أمر البيع في عنوان تقرير Detailed Item Report
 
 // ============= GLOBAL VARIABLES =============
 const SERVER_URL = 'http://192.168.0.17:3000';
@@ -4473,7 +4474,7 @@ async function generateItemsStatusReport() {
     }
 }
 
-// ====== تعديل generateDetailedItemReport: إضافة Length في العنوان، وإزالة عمودي Length و Section من الجدول ======
+// ====== تعديل generateDetailedItemReport: إضافة Length في العنوان، وإزالة عمودي Length و Section من الجدول، وإضافة WO و SO في العنوان ======
 async function generateDetailedItemReport() {
     if (!hasPermission('canViewReports')) {
         showToast('غير مسموح لك بعرض التقارير', 'error');
@@ -4486,10 +4487,10 @@ async function generateDetailedItemReport() {
     if (!wo || !wo.items[itemIdx]) { showToast('Item not found', 'error'); return; }
     const item = wo.items[itemIdx];
     
-    // عرض العنوان مع القطاع والطول بين قوسين
+    // عرض العنوان مع القطاع والطول ورقم أمر الشغل ورقم أمر البيع
     const sectionDisplay = item.section || '-';
     const lengthDisplay = item.length || '-';
-    document.getElementById('reportTitle').textContent = `Detailed Item Report - ${item.itemName} (${sectionDisplay}, Length: ${lengthDisplay})`;
+    document.getElementById('reportTitle').textContent = `Detailed Item Report - ${item.itemName} (${sectionDisplay}, Length: ${lengthDisplay}) | WO: ${wo.workOrderName} | SO: ${wo.salesOrderNumber}`;
     
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');

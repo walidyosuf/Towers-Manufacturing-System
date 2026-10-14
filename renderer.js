@@ -1,11 +1,9 @@
-// renderer.js - Tower Manufacturing Management System v2.2.10
+// renderer.js - Tower Manufacturing Management System v2.2.11
 // ============================================================================
+// ✅ v2.2.11: إضافة قائمة نوع العطل (ماكينة/خامة/عامل/لوحة) + حقل اسم العامل
+// ✅ v2.2.11: إضافة حقول بحث في NCR لقوائم Work Order و Item
 // ✅ v2.2.10: إلغاء مرحلة Galvanizing + جعل Finish آخر عملية في كل بند
-// ✅ v2.2.9: إصلاح completedQuantity ليكون الحد الأدنى بين العمليات (bottleneck) بدلاً من المجموع
-// ✅ v2.2.9: تحصين isWorkOrderCompleted ليفحص كل عملية مباشرة
-// ✅ v2.2.9: إصلاح deleteProductionRecord ليعيد حساب completedQuantity بالطريقة الصحيحة (min)
-// ✅ v2.2.9: دالة صيانة لإعادة حساب completedQuantity للأوامر القديمة عند تحميل البيانات
-// ✅ v2.2.10: recordProduction يكمّل جميع العمليات الأخرى (قبل وبعد) عند تسجيل finish
+// ✅ v2.2.9: إصلاح completedQuantity ليكون الحد الأدنى بين العمليات (bottleneck)
 // ============================================================================
 
 // ============= GLOBAL VARIABLES =============
@@ -26,10 +24,8 @@ let pendingSaves = 0;
 const lastSavePayload = {};
 const unconfirmedTypes = new Set();
 
-// متغير لتخزين خيارات أوامر العمل للبحث
 let allWorkOrderOptions = {};
 
-// ===== Variables for reports =====
 function esc(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -43,7 +39,7 @@ const STATUS = {
 };
 
 let appConfig = {
-    version: '2.2.10',
+    version: '2.2.11',
     settings: {},
     lastBackup: null,
     backupSchedule: 'none'
@@ -85,20 +81,16 @@ function yieldToUI() {
 // ============================================================================
 // ✅ HELPERS: تصنيف واستكمال العمليات
 // ============================================================================
-
-// هل العملية من نوع Galvanizing (لم تعد مستخدمة — تُحذف)
 function isGalvanizingOperation(op) {
     const name = (op && op.name ? op.name : (typeof op === 'string' ? op : '')).toString().toLowerCase();
     return name.includes('galv');
 }
 
-// هل العملية من نوع Finish
 function isFinishOperation(op) {
     const name = (op && op.name ? op.name : (typeof op === 'string' ? op : '')).toString().toLowerCase();
     return name.includes('finish');
 }
 
-// ✅ حذف أي عملية Galvanizing + ترتيب Finish في النهاية
 function normalizeItemOperations(ops) {
     if (!ops || !Array.isArray(ops)) return ops;
     const filtered = ops.filter(op => !isGalvanizingOperation(op));
@@ -107,11 +99,8 @@ function normalizeItemOperations(ops) {
     return [...others, ...finishOps];
 }
 
-// ✅ حساب completedQuantity = الحد الأدنى بين العمليات (bottleneck)
 function recalcItemCompletedQuantity(item) {
-    if (!item || !item.operations || item.operations.length === 0) {
-        return 0;
-    }
+    if (!item || !item.operations || item.operations.length === 0) return 0;
     let minCompleted = Infinity;
     item.operations.forEach(op => {
         const comp = item.completedOperations ? item.completedOperations[op.name] : null;
@@ -122,11 +111,9 @@ function recalcItemCompletedQuantity(item) {
     return Math.min(minCompleted, item.quantity || 0);
 }
 
-// ✅ إعادة حساب الحالة بناءً على العمليات
 function recalcItemStatus(item) {
     if (!item) return;
     item.completedQuantity = recalcItemCompletedQuantity(item);
-
     let allComplete = true;
     let anyCompleted = false;
     item.operations.forEach(op => {
@@ -135,9 +122,7 @@ function recalcItemStatus(item) {
         if (qty < item.quantity) allComplete = false;
         if (qty > 0) anyCompleted = true;
     });
-    if (item.status === 'Blocked') {
-        return; // لا نغيّر المحظور
-    }
+    if (item.status === 'Blocked') return;
     if (allComplete && item.completedQuantity >= item.quantity) {
         item.status = STATUS.COMPLETED;
     } else if (anyCompleted) {
@@ -230,10 +215,10 @@ async function loadUsers() {
                 { username: 'projects', password: 'projects123', role: 'projects' },
                 { username: 'top', password: 'top123', role: 'top_management' }
             ];
-            try { await saveUsersToServer(); } catch (e) { /* ignore */ }
+            try { await saveUsersToServer(); } catch (e) { }
         }
     } catch (error) {
-        console.error('Error loading users from server, using default local list:', error);
+        console.error('Error loading users from server:', error);
         usersDB = [
             { username: 'admin', password: 'admin123', role: 'administrator' },
             { username: 'planning', password: 'planning123', role: 'planning' },
@@ -245,14 +230,8 @@ async function loadUsers() {
     }
 }
 
-async function saveUsersToServer() {
-    await saveToServer('usersDB', usersDB);
-}
-
-function findUser(username) {
-    return usersDB.find(u => u.username.toLowerCase() === username.toLowerCase());
-}
-
+async function saveUsersToServer() { await saveToServer('usersDB', usersDB); }
+function findUser(username) { return usersDB.find(u => u.username.toLowerCase() === username.toLowerCase()); }
 function authenticateUser(username, password) {
     const user = findUser(username);
     if (user && user.password === password) return user;
@@ -262,10 +241,7 @@ function authenticateUser(username, password) {
 // ============= LOGIN FUNCTIONS =============
 function login(username, password) {
     const user = authenticateUser(username, password);
-    if (!user) {
-        showToast('اسم المستخدم أو كلمة المرور غير صحيحة', 'error');
-        return false;
-    }
+    if (!user) { showToast('اسم المستخدم أو كلمة المرور غير صحيحة', 'error'); return false; }
     currentUser = { username: user.username, role: user.role };
     localStorage.setItem('currentUser', JSON.stringify(currentUser));
     applyPermissions();
@@ -336,12 +312,9 @@ function applyPermissionsToCurrentSection() {
             const exportBtns = document.querySelector('#reportResults .report-header .flex');
             if (exportBtns) {
                 const btns = exportBtns.querySelectorAll('button:not(:last-child)');
-                btns.forEach(btn => {
-                    btn.style.display = hasPermission('canExportReports') ? '' : 'none';
-                });
+                btns.forEach(btn => { btn.style.display = hasPermission('canExportReports') ? '' : 'none'; });
             }
             break;
-        default: break;
     }
 }
 
@@ -397,13 +370,11 @@ function applyPermissions() {
         recordDtnBtn.disabled = !hasPermission('canRecordDowntime');
         recordDtnBtn.style.opacity = hasPermission('canRecordDowntime') ? 1 : 0.5;
     }
-
     const recordNcrBtn = document.querySelector('#ncrForm button[onclick="recordNCR()"]');
     if (recordNcrBtn) {
         recordNcrBtn.disabled = !hasPermission('canRecordNCR');
         recordNcrBtn.style.opacity = hasPermission('canRecordNCR') ? 1 : 0.5;
     }
-
     applyPermissionsToCurrentSection();
 }
 
@@ -436,11 +407,8 @@ function handleLogin() {
     }
     const success = login(username, password);
     if (success) {
-        if (!dataReady) {
-            loadData().then(() => renderAll());
-        } else {
-            renderAll();
-        }
+        if (!dataReady) { loadData().then(() => renderAll()); }
+        else { renderAll(); }
     }
 }
 
@@ -472,19 +440,14 @@ async function saveToServer(dataType, data) {
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
-        if (!result.success) {
-            showToast('Error saving data: ' + (result.error || 'Unknown error'), 'error');
-        } else {
-            unconfirmedTypes.delete(dataType);
-        }
+        if (!result.success) showToast('Error saving data: ' + (result.error || 'Unknown error'), 'error');
+        else unconfirmedTypes.delete(dataType);
         return result;
     } catch (error) {
         console.error('Error saving to server:', error);
         showToast('Error connecting to server: ' + error.message, 'error');
         return { success: false, error: error.message };
-    } finally {
-        pendingSaves--;
-    }
+    } finally { pendingSaves--; }
 }
 
 function flushUnsavedOnClose() {
@@ -544,10 +507,7 @@ async function loadProductionRecords() {
 }
 
 async function flushNewProductionRecords() {
-    if (!dataReady) {
-        showToast('⛔ الحفظ معطّل: لم يتم تحميل البيانات من الخادم بعد.', 'error');
-        return { success: false, error: 'data not loaded' };
-    }
+    if (!dataReady) { showToast('⛔ الحفظ معطّل: لم يتم تحميل البيانات من الخادم بعد.', 'error'); return { success: false, error: 'data not loaded' }; }
     const pending = productionDB.filter(r => !syncedRecordIds.has(r.id));
     if (pending.length === 0) return { success: true, inserted: 0 };
     try {
@@ -602,7 +562,6 @@ async function replaceAllProductionRecordsOnServer() {
     }
 }
 
-// ====== Create production records for archived orders (without toast) ======
 async function createProductionRecordsForArchivedOrders() {
     let createdCount = 0;
     workOrdersDB.forEach(wo => {
@@ -616,26 +575,16 @@ async function createProductionRecordsForArchivedOrders() {
                     if (completedQty > 0 && weightPerPiece > 0) {
                         const prodRec = {
                             id: Date.now() + Math.random(),
-                            workOrderId: wo.id,
-                            workOrderName: wo.workOrderName,
-                            projectName: wo.projectName,
-                            towerType: wo.type,
-                            model: wo.model,
-                            shift: 'Finished',
-                            machine: 'System',
-                            operator: 'System',
+                            workOrderId: wo.id, workOrderName: wo.workOrderName,
+                            projectName: wo.projectName, towerType: wo.type, model: wo.model,
+                            shift: 'Finished', machine: 'System', operator: 'System',
                             date: wo.date || new Date().toISOString().split('T')[0],
-                            itemName: item.itemName,
-                            itemSection: item.section,
-                            operation: 'Finished',
-                            quantity: completedQty,
-                            rejectedQty: 0,
-                            producedWeight: totalWeight,
-                            weightPerPiece: weightPerPiece,
+                            itemName: item.itemName, itemSection: item.section, operation: 'Finished',
+                            quantity: completedQty, rejectedQty: 0,
+                            producedWeight: totalWeight, weightPerPiece: weightPerPiece,
                             totalItemWeight: item.totalWeight || totalWeight,
                             notes: 'Auto-generated from archived work order',
-                            timestamp: Date.now(),
-                            recordedBy: 'system'
+                            timestamp: Date.now(), recordedBy: 'system'
                         };
                         productionDB.push(prodRec);
                         createdCount++;
@@ -644,13 +593,10 @@ async function createProductionRecordsForArchivedOrders() {
             }
         }
     });
-    if (createdCount > 0) {
-        await flushNewProductionRecords();
-    }
+    if (createdCount > 0) await flushNewProductionRecords();
     return createdCount;
 }
 
-// ====== Convert archived work orders to finished (without toast) ======
 async function convertArchivedToFinished() {
     if (!hasPermission('canMarkAsFinished')) {
         showToast('❌ غير مسموح لك بنقل الأوامر المؤرشفة. هذه الصلاحية للمدير فقط.', 'error');
@@ -658,10 +604,7 @@ async function convertArchivedToFinished() {
     }
     let count = 0;
     workOrdersDB.forEach(wo => { if (wo.archived === true) count++; });
-    if (count === 0) {
-        showToast('لا توجد أوامر عمل في الأرشيف', 'info');
-        return;
-    }
+    if (count === 0) { showToast('لا توجد أوامر عمل في الأرشيف', 'info'); return; }
     if (confirm(`هل أنت متأكد من نقل ${count} أمر عمل من Archived إلى Finished Work Orders؟\nسيتم أيضاً إنشاء سجلات إنتاج للأوامر لعرض الوزن في Dashboard.`)) {
         await saveToServer('workOrdersDB', workOrdersDB);
         await createProductionRecordsForArchivedOrders();
@@ -676,7 +619,6 @@ async function convertArchivedToFinished() {
     }
 }
 
-// ====== إصلاح البيانات القديمة: completedQuantity ======
 function repairLegacyCompletedQuantities() {
     let repairedCount = 0;
     workOrdersDB.forEach(wo => {
@@ -684,10 +626,7 @@ function repairLegacyCompletedQuantities() {
             if (!item.operations || item.operations.length === 0) return;
             const before = item.completedQuantity || 0;
             const after = recalcItemCompletedQuantity(item);
-            if (before !== after) {
-                item.completedQuantity = after;
-                repairedCount++;
-            }
+            if (before !== after) { item.completedQuantity = after; repairedCount++; }
             let allComplete = true;
             let anyCompleted = false;
             item.operations.forEach(op => {
@@ -697,62 +636,40 @@ function repairLegacyCompletedQuantities() {
                 if (qty > 0) anyCompleted = true;
             });
             if (item.status !== 'Blocked') {
-                if (allComplete && item.completedQuantity >= item.quantity) {
-                    item.status = STATUS.COMPLETED;
-                } else if (anyCompleted) {
-                    item.status = STATUS.IN_PROGRESS;
-                } else {
-                    item.status = STATUS.PENDING;
-                }
+                if (allComplete && item.completedQuantity >= item.quantity) item.status = STATUS.COMPLETED;
+                else if (anyCompleted) item.status = STATUS.IN_PROGRESS;
+                else item.status = STATUS.PENDING;
             }
         });
     });
-    if (repairedCount > 0) {
-        console.log(`🔧 تم إصلاح completedQuantity لـ ${repairedCount} بند`);
-    }
+    if (repairedCount > 0) console.log(`🔧 تم إصلاح completedQuantity لـ ${repairedCount} بند`);
     return repairedCount;
 }
 
-// ====== ✅ NEW: إصلاح البنود القديمة — حذف عمليات Galvanizing + ترتيب Finish في النهاية ======
 function repairLegacyGalvanizingOperations() {
     let cleanedCount = 0;
     workOrdersDB.forEach(wo => {
         (wo.items || []).forEach(item => {
             if (!item.operations || item.operations.length === 0) return;
-
             const hasGalv = item.operations.some(op => isGalvanizingOperation(op));
-
-            // هل Finish في النهاية بالفعل؟
             const keptBeforeReorder = item.operations.filter(op => !isGalvanizingOperation(op));
             const lastIdx = keptBeforeReorder.length - 1;
             const finishPositions = keptBeforeReorder.map((op, i) => isFinishOperation(op) ? i : -1).filter(i => i >= 0);
             const lastFinishPos = finishPositions.length ? finishPositions[finishPositions.length - 1] : -1;
             const needsReorder = lastFinishPos !== -1 && lastFinishPos !== lastIdx;
-
             if (!hasGalv && !needsReorder) return;
-
-            // احذف مدخلات Galvanizing من completedOperations
             if (hasGalv && item.completedOperations) {
                 item.operations.forEach(op => {
-                    if (isGalvanizingOperation(op) && item.completedOperations[op.name]) {
-                        delete item.completedOperations[op.name];
-                    }
+                    if (isGalvanizingOperation(op) && item.completedOperations[op.name]) delete item.completedOperations[op.name];
                 });
             }
-
-            // ابنِ العمليات الجديدة
             item.operations = normalizeItemOperations(item.operations);
-
-            // أعد حساب completedQuantity + الحالة
             item.completedQuantity = recalcItemCompletedQuantity(item);
             recalcItemStatus(item);
-
             cleanedCount++;
         });
     });
-    if (cleanedCount > 0) {
-        console.log(`🔧 تم تنظيف ${cleanedCount} بند (حذف Galvanizing / إعادة ترتيب Finish)`);
-    }
+    if (cleanedCount > 0) console.log(`🔧 تم تنظيف ${cleanedCount} بند`);
     return cleanedCount;
 }
 
@@ -761,27 +678,18 @@ async function loadData() {
         db = await loadFromServer('towerDB');
         workOrdersDB = await loadFromServer('workOrdersDB');
         workOrdersDB.forEach(wo => { if (wo.archived === undefined) wo.archived = false; });
-
-        // ✅ إصلاح القيم القديمة قبل أي استخدام
         const repairedQty = repairLegacyCompletedQuantities();
         const repairedGalv = repairLegacyGalvanizingOperations();
         if (repairedQty > 0 || repairedGalv > 0) {
-            try {
-                await saveToServer('workOrdersDB', workOrdersDB);
-            } catch (e) {
-                console.warn('Could not persist repaired work orders:', e);
-            }
+            try { await saveToServer('workOrdersDB', workOrdersDB); } catch (e) { }
         }
-
         let archivedCount = 0;
         workOrdersDB.forEach(wo => { if (wo.archived === true) archivedCount++; });
-
         if (archivedCount > 0) {
             console.log(`🔄 جاري نقل ${archivedCount} أمر عمل من Archived إلى Finished...`);
             await saveToServer('workOrdersDB', workOrdersDB);
             await createProductionRecordsForArchivedOrders();
         }
-
         productionDB = await loadProductionRecords();
         const operatorsData = await loadFromServer('machineOperatorsDB');
         machineOperatorsDB = operatorsData || {};
@@ -827,20 +735,15 @@ async function saveAllData() {
 
 // ============= SETTINGS =============
 function showSettingsPanel() {
-    if (!hasPermission('canViewSettings')) {
-        showToast('غير مسموح لك بالوصول إلى الإعدادات', 'error');
-        return;
-    }
+    if (!hasPermission('canViewSettings')) { showToast('غير مسموح لك بالوصول إلى الإعدادات', 'error'); return; }
     showModal('settingsModal');
-    if (hasPermission('canManageUsers')) {
-        renderUsersManagement();
-    } else {
+    if (hasPermission('canManageUsers')) renderUsersManagement();
+    else {
         const usersSection = document.getElementById('usersManagementContainer');
         if (usersSection) usersSection.innerHTML = '';
     }
 }
 
-// ============= USERS MANAGEMENT UI =============
 function renderUsersManagement() {
     const container = document.getElementById('usersManagementContainer');
     if (!container) return;
@@ -848,16 +751,9 @@ function renderUsersManagement() {
         <div class="card p-4 mt-4 border-t-2 border-indigo-200">
             <h3 class="text-lg font-bold mb-4"><i class="fa-solid fa-users-gear mr-2 text-indigo-600"></i> إدارة المستخدمين</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div class="input-group">
-                    <label class="input-label">اسم المستخدم</label>
-                    <input type="text" id="newUsername" class="input-field" placeholder="أدخل اسم المستخدم">
-                </div>
-                <div class="input-group">
-                    <label class="input-label">كلمة المرور</label>
-                    <input type="password" id="newPassword" class="input-field" placeholder="أدخل كلمة المرور">
-                </div>
-                <div class="input-group">
-                    <label class="input-label">الدور</label>
+                <div class="input-group"><label class="input-label">اسم المستخدم</label><input type="text" id="newUsername" class="input-field" placeholder="أدخل اسم المستخدم"></div>
+                <div class="input-group"><label class="input-label">كلمة المرور</label><input type="password" id="newPassword" class="input-field" placeholder="أدخل كلمة المرور"></div>
+                <div class="input-group"><label class="input-label">الدور</label>
                     <select id="newUserRole" class="input-field">
                         <option value="administrator">مدير النظام</option>
                         <option value="planning">التخطيط</option>
@@ -867,17 +763,10 @@ function renderUsersManagement() {
                         <option value="top_management">الإدارة العليا</option>
                     </select>
                 </div>
-                <div class="flex items-end">
-                    <button onclick="addUser()" class="btn btn-primary w-full"><i class="fa-solid fa-user-plus"></i> إضافة مستخدم</button>
-                </div>
+                <div class="flex items-end"><button onclick="addUser()" class="btn btn-primary w-full"><i class="fa-solid fa-user-plus"></i> إضافة مستخدم</button></div>
             </div>
             <div class="table-container">
-                <table class="table report-table">
-                    <thead>
-                        <tr><th>#</th><th>اسم المستخدم</th><th>الدور</th><th>إجراءات</th></tr>
-                    </thead>
-                    <tbody id="usersTableBody"></tbody>
-                </table>
+                <table class="table report-table"><thead><tr><th>#</th><th>اسم المستخدم</th><th>الدور</th><th>إجراءات</th></tr></thead><tbody id="usersTableBody"></tbody></table>
             </div>
         </div>
     `;
@@ -888,27 +777,14 @@ function renderUsersManagement() {
 function renderUsersTable() {
     const tbody = document.getElementById('usersTableBody');
     if (!tbody) return;
-    if (usersDB.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4">لا يوجد مستخدمين</td></tr>';
-        return;
-    }
+    if (usersDB.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4">لا يوجد مستخدمين</td></tr>'; return; }
     let rows = '';
     usersDB.forEach((user, index) => {
         const roleNames = {
             administrator: 'مدير النظام', planning: 'التخطيط', production: 'الإنتاج',
             qc: 'الجودة', projects: 'المشروعات', top_management: 'الإدارة العليا'
         };
-        rows += `
-            <tr>
-                <td class="text-center">${index + 1}</td>
-                <td class="font-bold">${esc(user.username)}</td>
-                <td class="text-center"><span class="badge badge-info">${roleNames[user.role] || user.role}</span></td>
-                <td class="text-center">
-                    <button onclick="editUser('${esc(user.username)}')" class="btn btn-sm btn-outline"><i class="fa-solid fa-edit"></i></button>
-                    <button onclick="deleteUser('${esc(user.username)}')" class="btn btn-sm btn-danger"><i class="fa-solid fa-trash"></i></button>
-                </td>
-            </tr>
-        `;
+        rows += `<tr><td class="text-center">${index + 1}</td><td class="font-bold">${esc(user.username)}</td><td class="text-center"><span class="badge badge-info">${roleNames[user.role] || user.role}</span></td><td class="text-center"><button onclick="editUser('${esc(user.username)}')" class="btn btn-sm btn-outline"><i class="fa-solid fa-edit"></i></button> <button onclick="deleteUser('${esc(user.username)}')" class="btn btn-sm btn-danger"><i class="fa-solid fa-trash"></i></button></td></tr>`;
     });
     tbody.innerHTML = rows;
 }
@@ -917,14 +793,8 @@ async function addUser() {
     const username = document.getElementById('newUsername').value.trim();
     const password = document.getElementById('newPassword').value.trim();
     const role = document.getElementById('newUserRole').value;
-    if (!username || !password) {
-        showToast('الرجاء إدخال اسم المستخدم وكلمة المرور', 'warning');
-        return;
-    }
-    if (findUser(username)) {
-        showToast('اسم المستخدم موجود بالفعل', 'error');
-        return;
-    }
+    if (!username || !password) { showToast('الرجاء إدخال اسم المستخدم وكلمة المرور', 'warning'); return; }
+    if (findUser(username)) { showToast('اسم المستخدم موجود بالفعل', 'error'); return; }
     usersDB.push({ username, password, role });
     await saveUsersToServer();
     renderUsersTable();
@@ -934,10 +804,7 @@ async function addUser() {
 }
 
 async function deleteUser(username) {
-    if (username === 'admin') {
-        showToast('لا يمكن حذف المستخدم الرئيسي', 'error');
-        return;
-    }
+    if (username === 'admin') { showToast('لا يمكن حذف المستخدم الرئيسي', 'error'); return; }
     if (!confirm(`هل أنت متأكد من حذف المستخدم "${username}"؟`)) return;
     const idx = usersDB.findIndex(u => u.username === username);
     if (idx === -1) return;
@@ -1068,9 +935,11 @@ const translations = {
         selectReportType: "Select Report Type ", backupRestore: "Backup Management ",
         createBackup: "Create Backup ", saveAllData: "Save all system data to a JSON file ",
         restoreBackup: "Restore Backup ", restoreData: "Restore data from a backup file ",
-        downtimeRecording: "Downtime Recording ", downtimeType: "Downtime Type ",
-        selectDowntimeType: "Select type... ", maintenance: "Maintenance ",
-        planningLoad: "Planning Load ", materialIssue: "Material Issue ",
+        downtimeRecording: "Downtime Recording ", downtimeType: "Fault Type ",
+        selectDowntimeType: "Select type... ",
+        workerName: "Worker Name ",
+        workerNamePlaceholder: "Enter worker name... ",
+        maintenance: "Maintenance ", planningLoad: "Planning Load ", materialIssue: "Material Issue ",
         laborShortage: "Labor Shortage ", quality: "Quality ",
         description: "Description ", durationMinutes: "Duration (minutes) ",
         recordDowntime: "Record Downtime ", downtimeInfo: "Downtime Information ",
@@ -1222,9 +1091,11 @@ const translations = {
         selectReportType: "اختر نوع التقرير ", backupRestore: "إدارة النسخ الاحتياطي ",
         createBackup: "إنشاء نسخة احتياطية ", saveAllData: "حفظ جميع بيانات النظام في ملف JSON ",
         restoreBackup: "استعادة النسخة الاحتياطية ", restoreData: "استعادة البيانات من ملف نسخ احتياطي ",
-        downtimeRecording: "تسجيل التوقفات ", downtimeType: "نوع التوقف ",
-        selectDowntimeType: "اختر النوع... ", maintenance: "صيانة ",
-        planningLoad: "تحميل من التخطيط ", materialIssue: "صرف خامات ",
+        downtimeRecording: "تسجيل التوقفات ", downtimeType: "نوع العطل ",
+        selectDowntimeType: "اختر النوع... ",
+        workerName: "اسم العامل ",
+        workerNamePlaceholder: "أدخل اسم العامل... ",
+        maintenance: "صيانة ", planningLoad: "تحميل من التخطيط ", materialIssue: "صرف خامات ",
         laborShortage: "عدم كفاية العمالة ", quality: "جودة ",
         description: "الوصف ", durationMinutes: "المدة (دقائق) ",
         recordDowntime: "تسجيل التوقف ", downtimeInfo: "معلومات التوقفات ",
@@ -1361,14 +1232,12 @@ function updateLanguageButtons() {
     }
 }
 
-// ============= ✅ FIXED: isWorkOrderCompleted - يفحص كل عملية مباشرة =============
+// ============= isWorkOrderCompleted =============
 function isWorkOrderCompleted(wo) {
     if (!wo || !wo.items || wo.items.length === 0) return false;
     return wo.items.every(item => {
         if (item.status === 'Completed') return true;
-        if (!item.operations || item.operations.length === 0) {
-            return (item.completedQuantity || 0) >= item.quantity;
-        }
+        if (!item.operations || item.operations.length === 0) return (item.completedQuantity || 0) >= item.quantity;
         return item.operations.every(op => {
             const comp = item.completedOperations ? item.completedOperations[op.name] : null;
             const qty = comp ? (parseInt(comp.completedQuantity) || 0) : 0;
@@ -1456,10 +1325,12 @@ function renderDashboard() {
     if (downtimeMap.size === 0) breakdown.innerHTML = '<p class="text-gray-500 text-center py-4">No downtime records</p>';
     else {
         const colors = ['#f44336', '#ff9800', '#2196f3', '#4caf50', '#9c27b0'];
+        const typeLabels = { 'Machine': 'ماكينة', 'Material': 'خامة', 'Worker': 'عامل', 'Panel': 'لوحة' };
         let i = 0;
         for (let [type, mins] of downtimeMap.entries()) {
             const pct = totalDowntime > 0 ? (mins / totalDowntime) * 100 : 0;
-            breakdown.innerHTML += `<div class="mb-2"><div class="flex justify-between text-sm mb-1"><span class="font-medium">${type}</span><span>${mins} min (${pct.toFixed(1)}%)</span></div><div class="downtime-breakdown-bar"><div class="downtime-breakdown-fill" style="width:${pct}%; background-color:${colors[i % colors.length]}"></div></div></div>`;
+            const label = typeLabels[type] || type;
+            breakdown.innerHTML += `<div class="mb-2"><div class="flex justify-between text-sm mb-1"><span class="font-medium">${label}</span><span>${mins} min (${pct.toFixed(1)}%)</span></div><div class="downtime-breakdown-bar"><div class="downtime-breakdown-fill" style="width:${pct}%; background-color:${colors[i % colors.length]}"></div></div></div>`;
             i++;
         }
     }
@@ -1469,8 +1340,10 @@ function renderDashboard() {
     const recent = [...downtimeDB].sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
     if (recent.length === 0) recentBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">No downtime records</td></tr>';
     else {
+        const typeLabels = { 'Machine': 'ماكينة', 'Material': 'خامة', 'Worker': 'عامل', 'Panel': 'لوحة' };
         recent.forEach(rec => {
-            recentBody.innerHTML += `<tr><td class="text-center">${rec.date}</td><td class="text-center">${rec.machine}</td><td class="text-center">${rec.downtimeType}</td><td class="text-center font-bold text-red-600">${rec.durationMinutes} min</td></tr>`;
+            const label = typeLabels[rec.downtimeType] || rec.downtimeType;
+            recentBody.innerHTML += `<tr><td class="text-center">${rec.date}</td><td class="text-center">${rec.machine}</td><td class="text-center">${label}</td><td class="text-center font-bold text-red-600">${rec.durationMinutes} min</td></tr>`;
         });
     }
     renderDashboardStageSummary();
@@ -1505,7 +1378,7 @@ function computeStageSummary(scope) {
 }
 
 function buildStageSummaryHeaderHTML() {
-    return `<tr> <th>#</th> <th>Stage</th> <th>Total Qty</th> <th>Completed</th> <th>In Progress</th> <th>Completion %</th> <th>Total Weight (ton)</th> <th>Completed Weight (ton)</th> <th>Remaining Weight (ton)</th> </tr>`;
+    return `<tr><th>#</th><th>Stage</th><th>Total Qty</th><th>Completed</th><th>In Progress</th><th>Completion %</th><th>Total Weight (ton)</th><th>Completed Weight (ton)</th><th>Remaining Weight (ton)</th></tr>`;
 }
 
 function buildStageSummaryRowsHTML(agg) {
@@ -1528,37 +1401,15 @@ function buildStageSummaryRowsHTML(agg) {
         else if (pct > 0) pctClass = 'bg-orange-100 text-orange-800';
         const fmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
         const fmtTon = (kg) => Math.round((Number(kg) || 0) / 1000).toLocaleString('en-US');
-        rows.push(`<tr>
-         <td class="text-center">${idx}</td>
-         <td class="font-bold">${labels[s] || s}</td>
-         <td class="text-center">${fmtInt(b.totalQty)}</td>
-         <td class="text-center text-green-700 font-semibold">${fmtInt(b.doneQty)}</td>
-         <td class="text-center text-orange-700 font-semibold">${fmtInt(remQty)}</td>
-         <td class="text-center"><span class="status-indicator ${pctClass}">${pct.toFixed(1)}%</span></td>
-         <td class="text-center">${fmtTon(b.totalWt)}</td>
-         <td class="text-center">${fmtTon(b.doneWt)}</td>
-         <td class="text-center">${fmtTon(remWt)}</td>
-     </tr>`);
+        rows.push(`<tr><td class="text-center">${idx}</td><td class="font-bold">${labels[s] || s}</td><td class="text-center">${fmtInt(b.totalQty)}</td><td class="text-center text-green-700 font-semibold">${fmtInt(b.doneQty)}</td><td class="text-center text-orange-700 font-semibold">${fmtInt(remQty)}</td><td class="text-center"><span class="status-indicator ${pctClass}">${pct.toFixed(1)}%</span></td><td class="text-center">${fmtTon(b.totalWt)}</td><td class="text-center">${fmtTon(b.doneWt)}</td><td class="text-center">${fmtTon(remWt)}</td></tr>`);
     });
-    if (rows.length === 0) {
-        return '<tr><td colspan="9" class="text-center py-4">No data available</td></tr>';
-    }
+    if (rows.length === 0) return '<tr><td colspan="9" class="text-center py-4">No data available</td></tr>';
     const gRemQty = gTotQty - gDoneQty;
     const gRemWt = gTotWt - gDoneWt;
     const gPct = gTotWt > 0 ? (gDoneWt / gTotWt * 100) : 0;
     const fmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
     const fmtTon = (kg) => Math.round((Number(kg) || 0) / 1000).toLocaleString('en-US');
-    rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
-     <td class="text-center"></td>
-     <td class="font-bold">TOTAL (All Stages)</td>
-     <td class="text-center font-bold">${fmtInt(gTotQty)}</td>
-     <td class="text-center font-bold">${fmtInt(gDoneQty)}</td>
-     <td class="text-center font-bold">${fmtInt(gRemQty)}</td>
-     <td class="text-center font-bold">${gPct.toFixed(1)}%</td>
-     <td class="text-center font-bold">${fmtTon(gTotWt)}</td>
-     <td class="text-center font-bold">${fmtTon(gDoneWt)}</td>
-     <td class="text-center font-bold">${fmtTon(gRemWt)}</td>
- </tr>`);
+    rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;"><td class="text-center"></td><td class="font-bold">TOTAL (All Stages)</td><td class="text-center font-bold">${fmtInt(gTotQty)}</td><td class="text-center font-bold">${fmtInt(gDoneQty)}</td><td class="text-center font-bold">${fmtInt(gRemQty)}</td><td class="text-center font-bold">${gPct.toFixed(1)}%</td><td class="text-center font-bold">${fmtTon(gTotWt)}</td><td class="text-center font-bold">${fmtTon(gDoneWt)}</td><td class="text-center font-bold">${fmtTon(gRemWt)}</td></tr>`);
     return rows.join('');
 }
 
@@ -1690,10 +1541,7 @@ function computeMonthlyReportData(year, month) {
 
 async function generateMonthlyProductionReport() {
     const monthInput = document.getElementById('monthlyReportMonth');
-    if (!monthInput || !monthInput.value) {
-        showToast('Month not selected', 'warning');
-        return;
-    }
+    if (!monthInput || !monthInput.value) { showToast('Month not selected', 'warning'); return; }
     const [year, month] = monthInput.value.split('-').map(Number);
     const reportData = computeMonthlyReportData(year, month);
     const monthLabel = new Date(year, month - 1).toLocaleString(currentLanguage, { month: 'long', year: 'numeric' });
@@ -1707,19 +1555,7 @@ async function generateMonthlyProductionReport() {
         const rows = [];
         reportData.forEach((row, idx) => {
             const dayName = row.dateObj.toLocaleDateString(currentLanguage, { weekday: 'long' });
-            rows.push(`<tr>
-                <td class="text-center">${idx + 1}</td>
-                <td class="text-center">${row.date}</td>
-                <td class="text-center">${dayName}</td>
-                <td class="text-center">${row.minTons.toFixed(2)}</td>
-                <td class="text-center">${row.finTons.toFixed(2)}</td>
-                <td class="text-center">${22}</td>
-                <td class="text-center">${row.effMin.toFixed(1)}%</td>
-                <td class="text-center">${row.effFin.toFixed(1)}%</td>
-                <td class="text-center font-bold">${row.cumEffMin.toFixed(1)}%</td>
-                <td class="text-center font-bold">${row.cumEffFin.toFixed(1)}%</td>
-                <td class="text-center"><span class="badge ${row.statusClass}">${row.statusText}</span></td>
-            </tr>`);
+            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${row.date}</td><td class="text-center">${dayName}</td><td class="text-center">${row.minTons.toFixed(2)}</td><td class="text-center">${row.finTons.toFixed(2)}</td><td class="text-center">${22}</td><td class="text-center">${row.effMin.toFixed(1)}%</td><td class="text-center">${row.effFin.toFixed(1)}%</td><td class="text-center font-bold">${row.cumEffMin.toFixed(1)}%</td><td class="text-center font-bold">${row.cumEffFin.toFixed(1)}%</td><td class="text-center"><span class="badge ${row.statusClass}">${row.statusText}</span></td></tr>`);
         });
         const totalWorkingDays = reportData.filter(r => !r.isHoliday).length;
         const totalCumMin = reportData.reduce((sum, r) => sum + r.minTons, 0);
@@ -1727,17 +1563,7 @@ async function generateMonthlyProductionReport() {
         const totalCumTarget = totalWorkingDays * 22;
         const overallMinEff = totalCumTarget > 0 ? (totalCumMin / totalCumTarget) * 100 : 0;
         const overallFinEff = totalCumTarget > 0 ? (totalCumFin / totalCumTarget) * 100 : 0;
-        rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
-            <td class="text-center"></td>
-            <td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td>
-            <td class="text-center font-bold">${totalCumMin.toFixed(2)}</td>
-            <td class="text-center font-bold">${totalCumFin.toFixed(2)}</td>
-            <td class="text-center"></td>
-            <td class="text-center font-bold">${overallMinEff.toFixed(1)}%</td>
-            <td class="text-center font-bold">${overallFinEff.toFixed(1)}%</td>
-            <td class="text-center font-bold" colspan="2"></td>
-            <td class="text-center">Working Days: ${totalWorkingDays}</td>
-        </tr>`);
+        rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;"><td class="text-center"></td><td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td><td class="text-center font-bold">${totalCumMin.toFixed(2)}</td><td class="text-center font-bold">${totalCumFin.toFixed(2)}</td><td class="text-center"></td><td class="text-center font-bold">${overallMinEff.toFixed(1)}%</td><td class="text-center font-bold">${overallFinEff.toFixed(1)}%</td><td class="text-center font-bold" colspan="2"></td><td class="text-center">Working Days: ${totalWorkingDays}</td></tr>`);
         body.innerHTML = rows.join('');
     }
     document.getElementById('reportResults').classList.remove('hidden');
@@ -1756,30 +1582,14 @@ function renderDashboardMonthlyReport() {
     const monthLabel = new Date(year, month - 1).toLocaleString(currentLanguage, { month: 'long', year: 'numeric' });
     const monthSpan = document.getElementById('dashboardMonthlyReportMonth');
     if (monthSpan) monthSpan.textContent = monthLabel;
-    head.innerHTML = `<tr>
-        <th>#</th><th>Date</th><th>Day</th><th>Min (tons)</th><th>Finish (tons)</th>
-        <th>Target (tons)</th><th>Min Eff %</th><th>Finish Eff %</th>
-        <th>Cum. Min Eff %</th><th>Cum. Finish Eff %</th><th>Status</th>
-    </tr>`;
+    head.innerHTML = `<tr><th>#</th><th>Date</th><th>Day</th><th>Min (tons)</th><th>Finish (tons)</th><th>Target (tons)</th><th>Min Eff %</th><th>Finish Eff %</th><th>Cum. Min Eff %</th><th>Cum. Finish Eff %</th><th>Status</th></tr>`;
     if (reportData.length === 0) {
         body.innerHTML = `<tr><td colspan="11" class="text-center py-4">${translations[currentLanguage].noData || 'No production data for this month'}</td></tr>`;
     } else {
         const rows = [];
         reportData.forEach((row, idx) => {
             const dayName = row.dateObj.toLocaleDateString(currentLanguage, { weekday: 'long' });
-            rows.push(`<tr>
-                <td class="text-center">${idx + 1}</td>
-                <td class="text-center">${row.date}</td>
-                <td class="text-center">${dayName}</td>
-                <td class="text-center">${row.minTons.toFixed(2)}</td>
-                <td class="text-center">${row.finTons.toFixed(2)}</td>
-                <td class="text-center">${22}</td>
-                <td class="text-center">${row.effMin.toFixed(1)}%</td>
-                <td class="text-center">${row.effFin.toFixed(1)}%</td>
-                <td class="text-center font-bold">${row.cumEffMin.toFixed(1)}%</td>
-                <td class="text-center font-bold">${row.cumEffFin.toFixed(1)}%</td>
-                <td class="text-center"><span class="badge ${row.statusClass}">${row.statusText}</span></td>
-            </tr>`);
+            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${row.date}</td><td class="text-center">${dayName}</td><td class="text-center">${row.minTons.toFixed(2)}</td><td class="text-center">${row.finTons.toFixed(2)}</td><td class="text-center">${22}</td><td class="text-center">${row.effMin.toFixed(1)}%</td><td class="text-center">${row.effFin.toFixed(1)}%</td><td class="text-center font-bold">${row.cumEffMin.toFixed(1)}%</td><td class="text-center font-bold">${row.cumEffFin.toFixed(1)}%</td><td class="text-center"><span class="badge ${row.statusClass}">${row.statusText}</span></td></tr>`);
         });
         const totalWorkingDays = reportData.filter(r => !r.isHoliday).length;
         const totalCumMin = reportData.reduce((sum, r) => sum + r.minTons, 0);
@@ -1787,17 +1597,7 @@ function renderDashboardMonthlyReport() {
         const totalCumTarget = totalWorkingDays * 22;
         const overallMinEff = totalCumTarget > 0 ? (totalCumMin / totalCumTarget) * 100 : 0;
         const overallFinEff = totalCumTarget > 0 ? (totalCumFin / totalCumTarget) * 100 : 0;
-        rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
-            <td class="text-center"></td>
-            <td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td>
-            <td class="text-center font-bold">${totalCumMin.toFixed(2)}</td>
-            <td class="text-center font-bold">${totalCumFin.toFixed(2)}</td>
-            <td class="text-center"></td>
-            <td class="text-center font-bold">${overallMinEff.toFixed(1)}%</td>
-            <td class="text-center font-bold">${overallFinEff.toFixed(1)}%</td>
-            <td class="text-center font-bold" colspan="2"></td>
-            <td class="text-center">Working Days: ${totalWorkingDays}</td>
-        </tr>`);
+        rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;"><td class="text-center"></td><td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td><td class="text-center font-bold">${totalCumMin.toFixed(2)}</td><td class="text-center font-bold">${totalCumFin.toFixed(2)}</td><td class="text-center"></td><td class="text-center font-bold">${overallMinEff.toFixed(1)}%</td><td class="text-center font-bold">${overallFinEff.toFixed(1)}%</td><td class="text-center font-bold" colspan="2"></td><td class="text-center">Working Days: ${totalWorkingDays}</td></tr>`);
         body.innerHTML = rows.join('');
     }
 }
@@ -1866,21 +1666,14 @@ function populateReportDropdowns() {
         allWorkOrderOptions[wo.id] = display;
         return `<option value="${wo.id}">${display}</option>`;
     }).join('');
-    if (sel1) {
-        sel1.innerHTML = allOption + opts;
-        sel1.setAttribute('data-all-options', allOption + opts);
-    }
-    if (sel2) {
-        sel2.innerHTML = placeholder + opts;
-        sel2.setAttribute('data-all-options', placeholder + opts);
-    }
+    if (sel1) { sel1.innerHTML = allOption + opts; sel1.setAttribute('data-all-options', allOption + opts); }
+    if (sel2) { sel2.innerHTML = placeholder + opts; sel2.setAttribute('data-all-options', placeholder + opts); }
 }
 
 function filterWorkOrderSelect() {
     const search = document.getElementById('reportWorkOrderSearch').value.toLowerCase().trim();
     const sel = document.getElementById('reportWorkOrder');
-    const options = sel.querySelectorAll('option');
-    options.forEach(opt => {
+    sel.querySelectorAll('option').forEach(opt => {
         const text = opt.textContent.toLowerCase();
         opt.style.display = (text.includes(search) || search === '') ? '' : 'none';
     });
@@ -1890,8 +1683,7 @@ function filterWorkOrderSelect() {
 function filterDetailWorkOrderSelect() {
     const search = document.getElementById('detailReportWorkOrderSearch').value.toLowerCase().trim();
     const sel = document.getElementById('detailReportWorkOrder');
-    const options = sel.querySelectorAll('option');
-    options.forEach(opt => {
+    sel.querySelectorAll('option').forEach(opt => {
         const text = opt.textContent.toLowerCase();
         opt.style.display = (text.includes(search) || search === '') ? '' : 'none';
     });
@@ -1902,9 +1694,37 @@ function populateNCRWorkOrders() {
     const sel = document.getElementById('ncrWorkOrder');
     if (!sel) return;
     sel.innerHTML = '<option value="" disabled selected>Select work order...</option>';
-    workOrdersDB.forEach(wo => {
-        sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`;
+    workOrdersDB.forEach(wo => { sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`; });
+    const searchEl = document.getElementById('ncrWorkOrderSearch');
+    if (searchEl) searchEl.value = '';
+    const itemSel = document.getElementById('ncrItem');
+    if (itemSel) itemSel.innerHTML = '<option value="" disabled selected>Select item...</option>';
+    const itemSearchEl = document.getElementById('ncrItemSearch');
+    if (itemSearchEl) itemSearchEl.value = '';
+}
+
+function filterNCRWorkOrderSelect() {
+    const searchEl = document.getElementById('ncrWorkOrderSearch');
+    const sel = document.getElementById('ncrWorkOrder');
+    if (!searchEl || !sel) return;
+    const search = searchEl.value.toLowerCase().trim();
+    sel.querySelectorAll('option').forEach(opt => {
+        const text = opt.textContent.toLowerCase();
+        opt.style.display = (text.includes(search) || search === '') ? '' : 'none';
     });
+    if (sel.value && sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].style.display === 'none') sel.value = '';
+}
+
+function filterNCRItemSelect() {
+    const searchEl = document.getElementById('ncrItemSearch');
+    const sel = document.getElementById('ncrItem');
+    if (!searchEl || !sel) return;
+    const search = searchEl.value.toLowerCase().trim();
+    sel.querySelectorAll('option').forEach(opt => {
+        const text = opt.textContent.toLowerCase();
+        opt.style.display = (text.includes(search) || search === '') ? '' : 'none';
+    });
+    if (sel.value && sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].style.display === 'none') sel.value = '';
 }
 
 function populateShortageWorkOrders() {
@@ -1946,9 +1766,7 @@ function populateWorkOrdersForOperation() {
         let filtered = workOrdersDB;
         if (salesOrder) filtered = filtered.filter(wo => wo.salesOrderNumber === salesOrder);
         if (phase) filtered = filtered.filter(wo => wo.items.some(it => it.operations.some(op => getOperationPhase(op.name) === phase)));
-        filtered.forEach(wo => {
-            sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`;
-        });
+        filtered.forEach(wo => { sel.innerHTML += `<option value="${wo.id}">${wo.workOrderName} - ${wo.projectName}</option>`; });
     }
 }
 
@@ -1974,11 +1792,8 @@ function renderWorkOrdersList() {
     const search = document.getElementById('workOrderSearch').value.toLowerCase();
     container.innerHTML = '';
     let filtered = workOrdersDB;
-    if (currentWorkOrderFilter === 'inprogress') {
-        filtered = workOrdersDB.filter(wo => !isWorkOrderCompleted(wo) && !wo.archived);
-    } else if (currentWorkOrderFilter === 'finished') {
-        filtered = workOrdersDB.filter(wo => isWorkOrderCompleted(wo) || wo.archived === true);
-    }
+    if (currentWorkOrderFilter === 'inprogress') filtered = workOrdersDB.filter(wo => !isWorkOrderCompleted(wo) && !wo.archived);
+    else if (currentWorkOrderFilter === 'finished') filtered = workOrdersDB.filter(wo => isWorkOrderCompleted(wo) || wo.archived === true);
     filtered = filtered.filter(wo =>
         wo.workOrderName.toLowerCase().includes(search) ||
         wo.projectName.toLowerCase().includes(search) ||
@@ -1986,10 +1801,7 @@ function renderWorkOrdersList() {
         wo.model.toLowerCase().includes(search) ||
         wo.type.toLowerCase().includes(search)
     );
-    if (filtered.length === 0) {
-        container.innerHTML = `<p class="text-center text-gray-500 col-span-2 py-10">No work orders.</p>`;
-        return;
-    }
+    if (filtered.length === 0) { container.innerHTML = `<p class="text-center text-gray-500 col-span-2 py-10">No work orders.</p>`; return; }
     filtered.forEach(wo => {
         const total = wo.items.length;
         const completed = wo.items.filter(i => i.status === 'Completed').length;
@@ -1998,8 +1810,7 @@ function renderWorkOrdersList() {
         const hasProduction = productionDB.some(r => r.workOrderId === wo.id);
         const completionPercent = getWorkOrderCompletionPercentage(wo);
         const isArchived = wo.archived === true;
-        const canMarkFinished = (!isFinished && completionPercent >= 90 && !wo.archived &&
-            currentWorkOrderFilter === 'inprogress' && hasPermission('canMarkAsFinished'));
+        const canMarkFinished = (!isFinished && completionPercent >= 90 && !wo.archived && currentWorkOrderFilter === 'inprogress' && hasPermission('canMarkAsFinished'));
         const card = document.createElement('div');
         card.className = 'card cursor-pointer hover:shadow-lg transition';
         let totalOrderWeight = 0, completedOrderWeight = 0;
@@ -2008,87 +1819,31 @@ function renderWorkOrdersList() {
             totalOrderWeight += item.quantity * w;
             completedOrderWeight += (item.completedQuantity || 0) * w;
         });
-        card.innerHTML = `
-         <div class="p-4">
-             <div class="flex justify-between">
-                 <div>
-                     <h4 class="font-bold">${wo.workOrderName} ${isArchived ? '<span class="text-xs text-gray-400 ml-2">(Archived → Finished)</span>' : ''}</h4>
-                     <div class="flex gap-2 mt-2 flex-wrap">
-                         <span class="badge badge-info">${wo.type}</span>
-                         <span class="badge badge-warning">${wo.model}</span>
-                         <span class="badge badge-success text-xs">${wo.date}</span>
-                         ${isFinished || isArchived ? '<span class="badge badge-primary"><i class="fa-solid fa-check-circle"></i> Finished</span>' : '<span class="badge badge-warning"><i class="fa-solid fa-spinner"></i> In Progress</span>'}
-                         ${hasProduction ? '<span class="text-xs text-yellow-600"><i class="fa-solid fa-industry"></i> Has Production</span>' : ''}
-                         ${isArchived ? '<span class="badge badge-secondary"><i class="fa-solid fa-archive"></i> Archived</span>' : ''}
-                         <span class="text-xs text-gray-500">Weight: ${(completedOrderWeight / 1000).toFixed(2)} / ${(totalOrderWeight / 1000).toFixed(2)} tons</span>
-                     </div>
-                 </div>
-                 <div class="text-right">
-                     <span class="block font-bold text-green-600">${completed}/${total}</span>
-                     <div class="progress w-24 mt-1"><div class="progress-bar" style="width:${progress}%"></div></div>
-                     ${!isFinished ? `<span class="text-xs text-gray-500 block mt-1">Overall: ${completionPercent.toFixed(1)}%</span>` : ''}
-                 </div>
-             </div>
-             <div class="mt-4 pt-4 border-t">
-                 <div class="flex justify-between">
-                     <div class="text-sm">
-                         <span><i class="fa-solid fa-building mr-1"></i> ${wo.projectName}</span>
-                         <span class="block mt-1"><i class="fa-solid fa-tag mr-1"></i> ${wo.salesOrderNumber}</span>
-                         <span class="block mt-1 text-xs text-gray-500">Total Weight: ${(totalOrderWeight / 1000).toFixed(2)} tons</span>
-                     </div>
-                     <div class="flex flex-col items-end gap-2">
-                         <div class="text-xs text-gray-500">${wo.creationTime}</div>
-                         <div class="flex gap-2">
-                             ${canMarkFinished ? `
-                             <button onclick="event.stopPropagation(); markWorkOrderAsFinished(${wo.id})" 
-                                 class="btn btn-success btn-lg font-bold text-white px-6 py-2 rounded-lg border-4 border-green-700 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-                                 style="background: linear-gradient(135deg, #22c55e, #16a34a); border-color: #15803d; box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);">
-                                 <i class="fa-solid fa-flag-checkered text-xl"></i>
-                                 <span class="text-lg">${translations[currentLanguage].markAsFinished || 'Mark as Finished'}</span>
-                             </button>
-                             ` : ''}
-                             ${!hasProduction && !wo.archived && hasPermission('canDeleteWorkOrder') ?
-                             `<button onclick="event.stopPropagation(); showDeleteWorkOrderConfirmation(${wo.id})" class="delete-btn text-red-500 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}
-                         </div>
-                     </div>
-                 </div>
-             </div>
-         </div>
-     `;
+        card.innerHTML = `<div class="p-4"><div class="flex justify-between"><div><h4 class="font-bold">${wo.workOrderName} ${isArchived ? '<span class="text-xs text-gray-400 ml-2">(Archived → Finished)</span>' : ''}</h4><div class="flex gap-2 mt-2 flex-wrap"><span class="badge badge-info">${wo.type}</span><span class="badge badge-warning">${wo.model}</span><span class="badge badge-success text-xs">${wo.date}</span>${isFinished || isArchived ? '<span class="badge badge-primary"><i class="fa-solid fa-check-circle"></i> Finished</span>' : '<span class="badge badge-warning"><i class="fa-solid fa-spinner"></i> In Progress</span>'}${hasProduction ? '<span class="text-xs text-yellow-600"><i class="fa-solid fa-industry"></i> Has Production</span>' : ''}${isArchived ? '<span class="badge badge-secondary"><i class="fa-solid fa-archive"></i> Archived</span>' : ''}<span class="text-xs text-gray-500">Weight: ${(completedOrderWeight / 1000).toFixed(2)} / ${(totalOrderWeight / 1000).toFixed(2)} tons</span></div></div><div class="text-right"><span class="block font-bold text-green-600">${completed}/${total}</span><div class="progress w-24 mt-1"><div class="progress-bar" style="width:${progress}%"></div></div>${!isFinished ? `<span class="text-xs text-gray-500 block mt-1">Overall: ${completionPercent.toFixed(1)}%</span>` : ''}</div></div><div class="mt-4 pt-4 border-t"><div class="flex justify-between"><div class="text-sm"><span><i class="fa-solid fa-building mr-1"></i> ${wo.projectName}</span><span class="block mt-1"><i class="fa-solid fa-tag mr-1"></i> ${wo.salesOrderNumber}</span><span class="block mt-1 text-xs text-gray-500">Total Weight: ${(totalOrderWeight / 1000).toFixed(2)} tons</span></div><div class="flex flex-col items-end gap-2"><div class="text-xs text-gray-500">${wo.creationTime}</div><div class="flex gap-2">${canMarkFinished ? `<button onclick="event.stopPropagation(); markWorkOrderAsFinished(${wo.id})" class="btn btn-success btn-lg font-bold text-white px-6 py-2 rounded-lg border-4 border-green-700 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2" style="background: linear-gradient(135deg, #22c55e, #16a34a); border-color: #15803d; box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);"><i class="fa-solid fa-flag-checkered text-xl"></i><span class="text-lg">${translations[currentLanguage].markAsFinished || 'Mark as Finished'}</span></button>` : ''}${!hasProduction && !wo.archived && hasPermission('canDeleteWorkOrder') ? `<button onclick="event.stopPropagation(); showDeleteWorkOrderConfirmation(${wo.id})" class="delete-btn text-red-500 text-sm"><i class="fa-solid fa-trash"></i></button>` : ''}</div></div></div></div></div>`;
         card.onclick = () => showWorkOrderDetails(wo.id);
         container.appendChild(card);
     });
 }
 
 async function markWorkOrderAsFinished(id) {
-    if (!hasPermission('canMarkAsFinished')) {
-        showToast('❌ غير مسموح لك بإنهاء أوامر العمل. هذه الصلاحية للمدير فقط.', 'error');
-        return;
-    }
+    if (!hasPermission('canMarkAsFinished')) { showToast('❌ غير مسموح لك بإنهاء أوامر العمل. هذه الصلاحية للمدير فقط.', 'error'); return; }
     const t = translations[currentLanguage];
     const wo = workOrdersDB.find(w => w.id === id);
     if (!wo) return;
-    if (wo.archived) {
-        showToast('⚠️ Work order is already finished', 'warning');
-        return;
-    }
+    if (wo.archived) { showToast('⚠️ Work order is already finished', 'warning'); return; }
     const percent = getWorkOrderCompletionPercentage(wo);
     if (percent < 90) {
-        showToast(`${t.minCompletionRequired || 'Minimum 90% completion required to mark as finished'} (${percent.toFixed(1)}%)`, 'warning');
+        showToast(`${t.minCompletionRequired || 'Minimum 90% completion required'} (${percent.toFixed(1)}%)`, 'warning');
         return;
     }
     if (confirm(t.markAsFinishedConfirm || `Mark work order "${wo.workOrderName}" as Finished?`)) {
         wo.archived = true;
         await saveToServer('workOrdersDB', workOrdersDB);
         await createProductionRecordsForArchivedOrders();
-        renderWorkOrdersList();
-        renderDashboard();
-        populateProductionTowerTypeDropdown();
-        populateDailyReportWorkOrders();
-        populateNCRWorkOrders();
-        populateReportDropdowns();
-        populateShortageWorkOrders();
-        populateWorkOrdersForOperation();
+        renderWorkOrdersList(); renderDashboard();
+        populateProductionTowerTypeDropdown(); populateDailyReportWorkOrders();
+        populateNCRWorkOrders(); populateReportDropdowns();
+        populateShortageWorkOrders(); populateWorkOrdersForOperation();
         showToast(`✅ Work order "${wo.workOrderName}" marked as Finished successfully!`, 'success');
     }
 }
@@ -2123,39 +1878,20 @@ function showWorkOrderDetails(id) {
         const approveBtn = (hasPermission('canApproveItem') && !isCompleted) ? `<button onclick="approveItem(${wo.id}, ${idx})" class="btn btn-success btn-sm"><i class="fa-solid fa-check-double"></i> اعتماد</button>` : '';
         const blockBtn = (hasPermission('canBlockItem') && !isCompleted) ? `<button onclick="blockItem(${wo.id}, ${idx})" class="btn btn-danger btn-sm"><i class="fa-solid fa-ban"></i> حظر</button>` : '';
         const extraActions = (approveBtn || blockBtn || showBalanceComplete) ? `<td class="text-center">${approveBtn} ${blockBtn} ${showBalanceComplete ? `<button onclick="completeItemAsBalance(${wo.id}, ${idx})" class="btn btn-primary btn-sm"><i class="fa-solid fa-scale-balanced"></i> ${translations[currentLanguage].balanceComplete || 'Complete as Balance'}</button>` : ''}</td>` : '<td></td>';
-        woRows.push(`<tr>
-         <td class="text-center">${idx + 1}</td>
-         <td class="font-bold">${item.itemName}</td>
-         <td><span class="px-2 py-1 text-xs rounded-full ${item.section.startsWith('L') ? 'bg-indigo-100' : (item.section.startsWith('P') || item.section.startsWith('F')) ? 'bg-teal-100' : 'bg-pink-100'}">${item.section}</span></td>
-         <td class="text-center">${item.steelGrade || '-'}</td>
-         <td class="text-center">${item.length || '-'}</td>
-         <td class="font-bold ${item.status === 'Completed' ? 'text-green-700' : 'text-yellow-700'}">${item.completedQuantity || 0}/${item.quantity}</td>
-         <td class="font-bold">${item.weightPerPiece || 0}</td>
-         <td class="font-bold">${item.totalWeight || 0}</td>
-         <td class="text-center">${opsHtml}</td>
-         <td class="text-center"><span class="status-indicator ${statusClass}">${item.status}</span></td>
-         ${extraActions}
-     </tr>`);
+        woRows.push(`<tr><td class="text-center">${idx + 1}</td><td class="font-bold">${item.itemName}</td><td><span class="px-2 py-1 text-xs rounded-full ${item.section.startsWith('L') ? 'bg-indigo-100' : (item.section.startsWith('P') || item.section.startsWith('F')) ? 'bg-teal-100' : 'bg-pink-100'}">${item.section}</span></td><td class="text-center">${item.steelGrade || '-'}</td><td class="text-center">${item.length || '-'}</td><td class="font-bold ${item.status === 'Completed' ? 'text-green-700' : 'text-yellow-700'}">${item.completedQuantity || 0}/${item.quantity}</td><td class="font-bold">${item.weightPerPiece || 0}</td><td class="font-bold">${item.totalWeight || 0}</td><td class="text-center">${opsHtml}</td><td class="text-center"><span class="status-indicator ${statusClass}">${item.status}</span></td>${extraActions}</tr>`);
     });
     tbody.innerHTML = woRows.join('');
     document.getElementById('workOrderDetailsView').classList.remove('hidden');
     document.getElementById('workOrderDetailsView').scrollIntoView({ behavior: 'smooth' });
 }
 
-// ====== approveItem ======
 async function approveItem(workOrderId, itemIndex) {
-    if (!hasPermission('canApproveItem')) {
-        showToast('غير مسموح لك باعتماد البنود', 'error');
-        return;
-    }
+    if (!hasPermission('canApproveItem')) { showToast('غير مسموح لك باعتماد البنود', 'error'); return; }
     const wo = workOrdersDB.find(w => w.id === workOrderId);
     if (!wo) return;
     const item = wo.items[itemIndex];
     if (!item) return;
-    if (item.status === 'Completed') {
-        showToast('البند مكتمل بالفعل', 'warning');
-        return;
-    }
+    if (item.status === 'Completed') { showToast('البند مكتمل بالفعل', 'warning'); return; }
     let allDone = true;
     for (const op of item.operations) {
         const comp = item.completedOperations[op.name];
@@ -2165,13 +1901,10 @@ async function approveItem(workOrderId, itemIndex) {
         item.status = 'Completed';
         item.completedQuantity = recalcItemCompletedQuantity(item);
         await saveToServer('workOrdersDB', workOrdersDB);
-        showWorkOrderDetails(workOrderId);
-        renderWorkOrdersList();
-        renderDashboard();
+        showWorkOrderDetails(workOrderId); renderWorkOrdersList(); renderDashboard();
         showToast('تم اعتماد البند كمنتج تام', 'success');
         return;
     }
-
     const today = new Date().toISOString().split('T')[0];
     let anyNewRecord = false;
     for (const op of item.operations) {
@@ -2193,13 +1926,10 @@ async function approveItem(workOrderId, itemIndex) {
                     quantity: remaining, rejectedQty: 0, producedWeight: prodWeight,
                     weightPerPiece: item.weightPerPiece, totalItemWeight: item.totalWeight,
                     notes: `تم الإكمال تلقائياً بواسطة اعتماد البند في ${today}`,
-                    timestamp: Date.now(),
-                    recordedBy: currentUser ? currentUser.username : 'system'
+                    timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
                 };
                 productionDB.push(prodRec);
-                if (!item.completedOperations[op.name]) {
-                    item.completedOperations[op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
-                }
+                if (!item.completedOperations[op.name]) item.completedOperations[op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
                 item.completedOperations[op.name].completedQuantity = item.quantity;
                 item.completedOperations[op.name].completed = true;
                 anyNewRecord = true;
@@ -2210,62 +1940,43 @@ async function approveItem(workOrderId, itemIndex) {
         item.status = 'Completed';
         item.completedQuantity = recalcItemCompletedQuantity(item);
         await saveToServer('workOrdersDB', workOrdersDB);
-        showWorkOrderDetails(workOrderId);
-        renderWorkOrdersList();
-        renderDashboard();
+        showWorkOrderDetails(workOrderId); renderWorkOrdersList(); renderDashboard();
         showToast('تم اعتماد البند كمنتج تام', 'success');
         return;
     }
     item.completedQuantity = recalcItemCompletedQuantity(item);
     recalcItemStatus(item);
-
     const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
     if (!woSaveResult || !woSaveResult.success) {
-        showToast('تعذّر حفظ تحديث أمر الشغل على الخادم، لم يتم تسجيل الإنتاج. تحقق من الاتصال وأعد المحاولة', 'error');
+        showToast('تعذّر حفظ تحديث أمر الشغل على الخادم، لم يتم تسجيل الإنتاج.', 'error');
         return;
     }
     await flushNewProductionRecords();
-    showWorkOrderDetails(workOrderId);
-    renderWorkOrdersList();
-    renderDashboard();
-    updateStats();
-    await updateIdealRatesFromActual();
+    showWorkOrderDetails(workOrderId); renderWorkOrdersList(); renderDashboard();
+    updateStats(); await updateIdealRatesFromActual();
     showToast('تم اعتماد البند كمنتج تام مع إكمال العمليات الناقصة تلقائياً', 'success');
 }
 
 async function blockItem(workOrderId, itemIndex) {
-    if (!hasPermission('canBlockItem')) {
-        showToast('غير مسموح لك بحظر البنود', 'error');
-        return;
-    }
+    if (!hasPermission('canBlockItem')) { showToast('غير مسموح لك بحظر البنود', 'error'); return; }
     const wo = workOrdersDB.find(w => w.id === workOrderId);
     if (!wo) return;
     const item = wo.items[itemIndex];
     if (!item) return;
-    if (item.status === 'Blocked') {
-        showToast('البند محظور بالفعل', 'warning');
-        return;
-    }
+    if (item.status === 'Blocked') { showToast('البند محظور بالفعل', 'warning'); return; }
     item.status = 'Blocked';
     await saveToServer('workOrdersDB', workOrdersDB);
-    showWorkOrderDetails(workOrderId);
-    renderWorkOrdersList();
-    renderDashboard();
+    showWorkOrderDetails(workOrderId); renderWorkOrdersList(); renderDashboard();
     showToast('تم حظر البند', 'success');
 }
 
-// ====== completeItemAsBalance ======
 async function completeItemAsBalance(workOrderId, itemIndex) {
-    if (!hasPermission('canRecordProduction')) {
-        showToast('غير مسموح لك بإكمال البند كـ Balance', 'error');
-        return;
-    }
+    if (!hasPermission('canRecordProduction')) { showToast('غير مسموح لك بإكمال البند كـ Balance', 'error'); return; }
     const wo = workOrdersDB.find(w => w.id === workOrderId);
     if (!wo) { showToast('Work order not found', 'error'); return; }
     const item = wo.items[itemIndex];
     if (!item) { showToast('Item not found', 'error'); return; }
     if (item.status === 'Completed') { showToast('Item already completed', 'warning'); return; }
-
     let minCompleted = Infinity;
     let hasOperations = false;
     item.operations.forEach(op => {
@@ -2278,11 +1989,9 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
     if (minCompleted === Infinity) minCompleted = 0;
     const remaining = item.quantity - minCompleted;
     if (remaining <= 0) { showToast('No remaining quantity to complete', 'warning'); return; }
-
     const completionDate = prompt('Enter completion date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
     if (!completionDate || !/^\d{4}-\d{2}-\d{2}$/.test(completionDate)) { showToast('Invalid or missing date', 'warning'); return; }
     if (!confirm(`Complete item "${item.itemName}" with remaining ${remaining} pcs as Balance on ${completionDate}?`)) return;
-
     showLoading(translations[currentLanguage].processing || 'Processing...');
     try {
         let updated = false;
@@ -2304,40 +2013,30 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
                     quantity: qtyToComplete, rejectedQty: 0, producedWeight: prodWeight,
                     weightPerPiece: item.weightPerPiece, totalItemWeight: item.totalWeight,
                     notes: `Auto-completed from Finished Work Order on ${completionDate} by Balance`,
-                    timestamp: Date.now(),
-                    recordedBy: currentUser ? currentUser.username : 'system'
+                    timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
                 };
                 productionDB.push(prodRec);
-                if (!item.completedOperations[op.name]) {
-                    item.completedOperations[op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
-                }
+                if (!item.completedOperations[op.name]) item.completedOperations[op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
                 item.completedOperations[op.name].completedQuantity = item.quantity;
                 item.completedOperations[op.name].completed = true;
                 updated = true;
             }
         }
         if (!updated) { hideLoading(); showToast('No pending operations to complete', 'info'); return; }
-
         item.completedQuantity = recalcItemCompletedQuantity(item);
         recalcItemStatus(item);
-
         const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
         if (!woSaveResult || !woSaveResult.success) {
             hideLoading();
-            showToast('تعذّر حفظ تحديث أمر الشغل على الخادم، لم يتم تسجيل إنتاج الـ Balance. تحقق من الاتصال وأعد المحاولة', 'error');
+            showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error');
             return;
         }
         await flushNewProductionRecords();
-        renderWorkOrdersList();
-        renderDashboard();
-        updateStats();
+        renderWorkOrdersList(); renderDashboard(); updateStats();
         await updateIdealRatesFromActual();
         showWorkOrderDetails(wo.id);
-        populateDailyReportWorkOrders();
-        populateNCRWorkOrders();
-        populateReportDropdowns();
-        populateShortageWorkOrders();
-        populateWorkOrdersForOperation();
+        populateDailyReportWorkOrders(); populateNCRWorkOrders(); populateReportDropdowns();
+        populateShortageWorkOrders(); populateWorkOrdersForOperation();
         hideLoading();
         showToast(`Item "${item.itemName}" completed successfully with Balance operator`, 'success');
     } catch (err) {
@@ -2359,13 +2058,7 @@ function showDetails(id) {
         const opsSequence = item.operations.map(op => op.name).join(' ← ');
         const sect = item.section.toString().trim().toUpperCase();
         const sectClass = sect.startsWith('L') ? 'bg-indigo-100' : (sect.startsWith('P') || sect.startsWith('F')) ? 'bg-teal-100' : 'bg-pink-100';
-        rows.push(`<tr>
-            <td class="text-center">${idx + 1}</td>
-            <td class="font-bold">${esc(item.itemName)}</td>
-            <td class="text-center"><span class="px-2 py-1 text-xs rounded-full ${sectClass}">${esc(item.section)}</span></td>
-            <td class="text-center">${esc(item.steelGrade || '-')}</td>
-            <td class="text-center">${esc(opsSequence)}</td>
-        </tr>`);
+        rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="font-bold">${esc(item.itemName)}</td><td class="text-center"><span class="px-2 py-1 text-xs rounded-full ${sectClass}">${esc(item.section)}</span></td><td class="text-center">${esc(item.steelGrade || '-')}</td><td class="text-center">${esc(opsSequence)}</td></tr>`);
     });
     tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="5" class="text-center py-4">No items</td></tr>';
     document.getElementById('detailsView').classList.remove('hidden');
@@ -2411,35 +2104,9 @@ function renderProductionList() {
         );
     }
     records.sort((a, b) => b.timestamp - a.timestamp);
-    if (records.length === 0) {
-        container.innerHTML = '<p class="text-center text-gray-500 py-10">No production records entered today.</p>';
-        return;
-    }
+    if (records.length === 0) { container.innerHTML = '<p class="text-center text-gray-500 py-10">No production records entered today.</p>'; return; }
     const canDelete = hasPermission('canDeleteProduction');
-    container.innerHTML = records.map(r => `
-        <div class="card cursor-pointer hover:shadow-lg transition">
-            <div class="p-4 flex items-center justify-between gap-4" onclick="showProductionDetails(${r.id})">
-                <div class="flex-1">
-                    <h4 class="font-bold">${esc(r.itemName)}</h4>
-                    <div class="flex gap-2 mt-2 flex-wrap">
-                        <span class="badge badge-info">${esc(r.operation)}</span>
-                        <span class="badge badge-warning">${esc(r.machine)}</span>
-                        <span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift)}</span>
-                    </div>
-                    <div class="text-sm text-gray-500 mt-2">
-                        <span><i class="fa-solid fa-building mr-1"></i> ${esc(r.workOrderName)}</span>
-                        <span class="mx-2">|</span>
-                        <span><i class="fa-solid fa-user mr-1"></i> ${esc(r.operator || 'Not specified')}</span>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <span class="block font-bold text-purple-700">${r.quantity} pcs</span>
-                    <span class="block text-sm text-green-700">${r.producedWeight || 0} kg</span>
-                </div>
-            </div>
-            ${canDelete ? `<div class="px-4 pb-3 flex justify-end"><button onclick="event.stopPropagation(); showDeleteProductionConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}
-        </div>
-    `).join('');
+    container.innerHTML = records.map(r => `<div class="card cursor-pointer hover:shadow-lg transition"><div class="p-4 flex items-center justify-between gap-4" onclick="showProductionDetails(${r.id})"><div class="flex-1"><h4 class="font-bold">${esc(r.itemName)}</h4><div class="flex gap-2 mt-2 flex-wrap"><span class="badge badge-info">${esc(r.operation)}</span><span class="badge badge-warning">${esc(r.machine)}</span><span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift)}</span></div><div class="text-sm text-gray-500 mt-2"><span><i class="fa-solid fa-building mr-1"></i> ${esc(r.workOrderName)}</span><span class="mx-2">|</span><span><i class="fa-solid fa-user mr-1"></i> ${esc(r.operator || 'Not specified')}</span></div></div><div class="text-right"><span class="block font-bold text-purple-700">${r.quantity} pcs</span><span class="block text-sm text-green-700">${r.producedWeight || 0} kg</span></div></div>${canDelete ? `<div class="px-4 pb-3 flex justify-end"><button onclick="event.stopPropagation(); showDeleteProductionConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}</div>`).join('');
 }
 
 function handleFileSelect(e) {
@@ -2476,12 +2143,8 @@ function handleWorkOrderFileSelect(e) {
     }
 }
 
-// ====== processData (Models) — مع تطبيع العمليات (حذف Galvanizing + Finish في النهاية) ======
 async function processData() {
-    if (!hasPermission('canCreateModel')) {
-        showToast('غير مسموح لك بإضافة نماذج', 'error');
-        return;
-    }
+    if (!hasPermission('canCreateModel')) { showToast('غير مسموح لك بإضافة نماذج', 'error'); return; }
     const type = document.getElementById('towerType').value;
     const model = document.getElementById('modelName').value.trim();
     if (!type || !model) { showToast('Please select tower type and enter model name', 'warning'); return; }
@@ -2506,7 +2169,6 @@ async function processData() {
             if ((sect.startsWith('P') || sect.startsWith('F')) && ops.some(o => o.name.toLowerCase().includes('bend'))) {
                 ops = ops.filter(o => !o.name.toLowerCase().includes('drill'));
             }
-            // ✅ تطبيع العمليات: حذف Galvanizing + ترتيب Finish في النهاية
             ops = normalizeItemOperations(ops);
             if (ops.length) items.push({ itemName, section, steelGrade, operations: ops });
         }
@@ -2520,12 +2182,8 @@ async function processData() {
     } catch (err) { hideLoading(); showToast('Error processing data', 'error'); console.error(err); }
 }
 
-// ====== processWorkOrder — مع تطبيع العمليات ======
 async function processWorkOrder() {
-    if (!hasPermission('canCreateWorkOrder')) {
-        showToast('غير مسموح لك بإنشاء أوامر العمل', 'error');
-        return;
-    }
+    if (!hasPermission('canCreateWorkOrder')) { showToast('غير مسموح لك بإنشاء أوامر العمل', 'error'); return; }
     const woName = document.getElementById('workOrderName').value.trim();
     const projName = document.getElementById('projectName').value.trim();
     const soNum = document.getElementById('salesOrderNumber').value.trim();
@@ -2554,7 +2212,6 @@ async function processWorkOrder() {
                 if (matchingItem) ops = matchingItem.operations;
                 else ops = [{ name: "No specific operations", machine: "To be determined", type: "General" }];
             }
-            // ✅ تطبيع العمليات قبل بناء completedOps
             ops = normalizeItemOperations(ops);
             const completedOps = {};
             ops.forEach(op => { completedOps[op.name] = { completed: false, completedQuantity: 0, totalRequired: quantity }; });
@@ -2578,7 +2235,6 @@ async function processWorkOrder() {
     } catch (err) { hideLoading(); showToast('Error processing work order', 'error'); console.error(err); }
 }
 
-// ====== ✅ getMachineForOperation — بدون Galvanizing ======
 function getMachineForOperation(opName, section) {
     const op = opName.toString().trim().toLowerCase();
     const sect = section.toString().trim().toUpperCase();
@@ -2599,7 +2255,6 @@ function getMachineForOperation(opName, section) {
     return { machine: "Standard", type: 'general' };
 }
 
-// ====== ✅ getOperationPhase — بدون Galvanizing ======
 function getOperationPhase(opName) {
     const o = opName.toLowerCase();
     if (o.includes('minimum') || o.includes('min')) return 'minimum';
@@ -2612,7 +2267,6 @@ function getOperationPhase(opName) {
     return 'general';
 }
 
-// ====== Production Form Handlers ======
 function onTowerTypeChange() { const t = document.getElementById('productionTowerType').value; if (t) { populateProductionModelDropdown(); saveProductionPreferences(); } }
 function onModelChange() { const m = document.getElementById('productionModel').value; if (m) { populateWorkOrderDropdown(); saveProductionPreferences(); } }
 function onWorkOrderChange() { const wo = document.getElementById('productionWorkOrder').value; if (wo) { populateProjectDropdown(); saveProductionPreferences(); } }
@@ -2661,9 +2315,8 @@ function loadAvailableItems() {
             const completedFinishing = item.completedOperations[finishingOp.name] ? item.completedOperations[finishingOp.name].completedQuantity : 0;
             if (completedFinishing >= item.quantity) return;
             let canShow = false;
-            if (balanceMode) {
-                canShow = true;
-            } else {
+            if (balanceMode) canShow = true;
+            else {
                 const finishIndex = item.operations.findIndex(op => op.name === finishingOp.name);
                 let allPrevComplete = true;
                 for (let i = 0; i < finishIndex; i++) {
@@ -2677,18 +2330,7 @@ function loadAvailableItems() {
                 const remaining = item.quantity - completedFinishing;
                 if (remaining > 0) {
                     has = true;
-                    currentAvailableItems.push({
-                        itemIndex: idx,
-                        operationName: finishingOp.name,
-                        item: item,
-                        remaining: remaining,
-                        displayName: finishingOp.name,
-                        total: item.quantity,
-                        completed: completedFinishing,
-                        section: item.section,
-                        weight: item.weightPerPiece || 0,
-                        isBalanceMode: balanceMode
-                    });
+                    currentAvailableItems.push({ itemIndex: idx, operationName: finishingOp.name, item: item, remaining: remaining, displayName: finishingOp.name, total: item.quantity, completed: completedFinishing, section: item.section, weight: item.weightPerPiece || 0, isBalanceMode: balanceMode });
                 }
             }
             return;
@@ -2781,7 +2423,6 @@ function validateQuantity() {
     else warn.classList.add('hidden');
 }
 
-// ====== ✅ canMachineDoOperation — بدون Galvanizing ======
 function canMachineDoOperation(machine, opName, section) {
     const op = opName.toLowerCase();
     const sect = section.toString().trim().toUpperCase();
@@ -2803,16 +2444,8 @@ function canMachineDoOperation(machine, opName, section) {
     return false;
 }
 
-// ============================================================================
-// ✅ FIXED v2.2.10: recordProduction
-// - يكمّل جميع العمليات الأخرى (السابقة واللاحقة) عند تسجيل finish
-// - يستخدم recalcItemStatus لإعادة حساب completedQuantity + الحالة
-// ============================================================================
 async function recordProduction() {
-    if (!hasPermission('canRecordProduction')) {
-        showToast('غير مسموح لك بتسجيل الإنتاج', 'error');
-        return;
-    }
+    if (!hasPermission('canRecordProduction')) { showToast('غير مسموح لك بتسجيل الإنتاج', 'error'); return; }
     const towerType = document.getElementById('productionTowerType').value;
     const model = document.getElementById('productionModel').value;
     const woId = document.getElementById('productionWorkOrder').value;
@@ -2824,46 +2457,28 @@ async function recordProduction() {
     const rejectedQty = parseInt(document.getElementById('productionRejectedQty').value) || 0;
     const notes = document.getElementById('productionNotes').value;
     const selectedIdx = document.getElementById('availableItemsSelect').value;
-    if (!towerType || !model || !woId || !shift || !machine || !date || !operator) {
-        showToast('Please fill all required fields', 'warning');
-        return;
-    }
-    if (selectedIdx === '') {
-        showToast('Please select item', 'warning');
-        return;
-    }
-    if (rejectedQty > quantity) {
-        showToast('Rejected quantity cannot exceed produced quantity', 'warning');
-        return;
-    }
+    if (!towerType || !model || !woId || !shift || !machine || !date || !operator) { showToast('Please fill all required fields', 'warning'); return; }
+    if (selectedIdx === '') { showToast('Please select item', 'warning'); return; }
+    if (rejectedQty > quantity) { showToast('Rejected quantity cannot exceed produced quantity', 'warning'); return; }
     const wo = workOrdersDB.find(w => w.id === parseInt(woId));
     if (!wo) { showToast('Work order not found', 'error'); return; }
     const item = wo.items[parseInt(selectedIdx)];
     const selOpt = document.getElementById('availableItemsSelect').selectedOptions[0];
     const opName = selOpt.getAttribute('data-operation');
     const isSheet = item.section.toString().trim().toUpperCase().startsWith('P') || item.section.toString().trim().toUpperCase().startsWith('F');
-
-    // === هل نكمّل باقي العمليات تلقائياً؟ ===
     const balanceModeActive = balanceMode && machine === 'Finishing';
     const opIsFinish = getOperationPhase(opName) === 'finish';
     const shouldCompleteOthers = balanceModeActive || opIsFinish;
-
     let finalOperator = operator;
 
-    // =========================================================================
-    // ✅ FIX: نكمّل *جميع* العمليات الأخرى (السابقة واللاحقة) وليس السابقة فقط.
-    // =========================================================================
     if (shouldCompleteOthers) {
         const currentOpIndex = item.operations.findIndex(op => op.name === opName);
         let anyOtherCompleted = false;
         for (let i = 0; i < item.operations.length; i++) {
-            if (i === currentOpIndex) continue;               // تخطَّ العملية الحالية
+            if (i === currentOpIndex) continue;
             const otherOp = item.operations[i];
-            if (otherOp.name === opName) continue;             // تخطَّ أي عملية بنفس الاسم
-
-            const otherComp = item.completedOperations[otherOp.name]
-                ? item.completedOperations[otherOp.name].completedQuantity
-                : 0;
+            if (otherOp.name === opName) continue;
+            const otherComp = item.completedOperations[otherOp.name] ? item.completedOperations[otherOp.name].completedQuantity : 0;
             if (otherComp < item.quantity) {
                 const remainingOther = item.quantity - otherComp;
                 if (remainingOther > 0) {
@@ -2873,31 +2488,17 @@ async function recordProduction() {
                     const otherProdWeight = Math.round(item.weightPerPiece * remainingOther);
                     const otherProdRec = {
                         id: Date.now() + Math.random(),
-                        workOrderId: parseInt(woId),
-                        workOrderName: wo.workOrderName,
-                        projectName: wo.projectName,
-                        towerType, model, shift,
-                        machine: otherMachine,
-                        operator: "Balance",
-                        date,
-                        itemName: item.itemName,
-                        itemSection: item.section,
-                        operation: otherOp.name,
-                        quantity: remainingOther,
-                        rejectedQty: 0,
-                        producedWeight: otherProdWeight,
-                        weightPerPiece: item.weightPerPiece,
-                        totalItemWeight: item.totalWeight,
-                        notes: opIsFinish
-                            ? "Auto-completed because item marked as Finished"
-                            : "Auto-completed by Balance mode",
-                        timestamp: Date.now(),
-                        recordedBy: currentUser ? currentUser.username : 'system'
+                        workOrderId: parseInt(woId), workOrderName: wo.workOrderName,
+                        projectName: wo.projectName, towerType, model, shift,
+                        machine: otherMachine, operator: "Balance", date,
+                        itemName: item.itemName, itemSection: item.section, operation: otherOp.name,
+                        quantity: remainingOther, rejectedQty: 0, producedWeight: otherProdWeight,
+                        weightPerPiece: item.weightPerPiece, totalItemWeight: item.totalWeight,
+                        notes: opIsFinish ? "Auto-completed because item marked as Finished" : "Auto-completed by Balance mode",
+                        timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
                     };
                     productionDB.push(otherProdRec);
-                    if (!item.completedOperations[otherOp.name]) {
-                        item.completedOperations[otherOp.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
-                    }
+                    if (!item.completedOperations[otherOp.name]) item.completedOperations[otherOp.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
                     item.completedOperations[otherOp.name].completedQuantity = item.quantity;
                     item.completedOperations[otherOp.name].completed = true;
                     anyOtherCompleted = true;
@@ -2908,17 +2509,14 @@ async function recordProduction() {
             const otherFlush = await flushNewProductionRecords();
             const otherSave = await saveToServer('workOrdersDB', workOrdersDB);
             if (!otherFlush || !otherFlush.success || !otherSave || !otherSave.success) {
-                showToast('تعذّر حفظ إكمال العمليات الأخرى تلقائيًا على الخادم، تحقق من الاتصال وأعد المحاولة', 'error');
+                showToast('تعذّر حفظ إكمال العمليات الأخرى تلقائيًا على الخادم.', 'error');
                 return;
             }
-            const msg = opIsFinish
-                ? 'تم إكمال باقي العمليات تلقائياً لأن العملية من نوع finish'
-                : 'تم إكمال العمليات الأخرى تلقائياً بواسطة Balance';
+            const msg = opIsFinish ? 'تم إكمال باقي العمليات تلقائياً لأن العملية من نوع finish' : 'تم إكمال العمليات الأخرى تلقائياً بواسطة Balance';
             showToast(msg, 'info');
         }
     }
 
-    // === تسجيل الإنتاج للعملية الحالية ===
     if (isSheet && machine === "Shear") {
         if (!item.completedOperations[opName]) item.completedOperations[opName] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
         else { item.completedOperations[opName].completedQuantity += quantity; if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true; }
@@ -2935,39 +2533,25 @@ async function recordProduction() {
         else { item.completedOperations[opName].completedQuantity += quantity; if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true; }
     }
 
-    // ✅ إعادة حساب completedQuantity = الحد الأدنى بين العمليات + تحديث الحالة
     item.completedQuantity = recalcItemCompletedQuantity(item);
     recalcItemStatus(item);
 
     const woIndex = workOrdersDB.findIndex(w => w.id === parseInt(woId));
     workOrdersDB[woIndex] = wo;
     const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
-    if (!woSaveResult || !woSaveResult.success) {
-        showToast('تعذّر حفظ تحديث أمر الشغل على الخادم، لم يتم تسجيل الإنتاج. تحقق من الاتصال وأعد المحاولة', 'error');
-        return;
-    }
+    if (!woSaveResult || !woSaveResult.success) { showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
     const goodQuantity = quantity - rejectedQty;
     const prodWeight = Math.round(item.weightPerPiece * goodQuantity);
     const prodRec = {
         id: Date.now(),
-        workOrderId: parseInt(woId),
-        workOrderName: wo.workOrderName,
-        projectName: wo.projectName,
-        towerType, model, shift,
-        machine,
-        operator: finalOperator,
-        date,
-        itemName: item.itemName,
-        itemSection: item.section,
-        operation: opName,
-        quantity,
-        rejectedQty,
-        producedWeight: prodWeight,
-        weightPerPiece: item.weightPerPiece,
-        totalItemWeight: item.totalWeight,
+        workOrderId: parseInt(woId), workOrderName: wo.workOrderName,
+        projectName: wo.projectName, towerType, model, shift, machine,
+        operator: finalOperator, date,
+        itemName: item.itemName, itemSection: item.section, operation: opName,
+        quantity, rejectedQty, producedWeight: prodWeight,
+        weightPerPiece: item.weightPerPiece, totalItemWeight: item.totalWeight,
         notes: notes + (balanceModeActive ? " (Balance mode)" : ""),
-        timestamp: Date.now(),
-        recordedBy: currentUser ? currentUser.username : 'system'
+        timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
     };
     productionDB.push(prodRec);
     await flushNewProductionRecords();
@@ -3022,11 +2606,25 @@ function calculateDowntimeDuration() {
     document.getElementById('downtimeDuration').value = durationMinutes;
 }
 
-async function recordDowntime() {
-    if (!hasPermission('canRecordDowntime')) {
-        showToast('غير مسموح لك بتسجيل التوقفات', 'error');
-        return;
+// ✅ إظهار/إخفاء حقل اسم العامل بناءً على نوع العطل
+function onDowntimeTypeChange() {
+    const type = document.getElementById('downtimeType').value;
+    const workerGroup = document.getElementById('workerNameGroup');
+    const workerInput = document.getElementById('downtimeWorkerName');
+    if (!workerGroup || !workerInput) return;
+    if (type === 'Worker') {
+        workerGroup.classList.remove('hidden');
+        workerInput.required = true;
+        workerInput.focus();
+    } else {
+        workerGroup.classList.add('hidden');
+        workerInput.required = false;
+        workerInput.value = '';
     }
+}
+
+async function recordDowntime() {
+    if (!hasPermission('canRecordDowntime')) { showToast('غير مسموح لك بتسجيل التوقفات', 'error'); return; }
     const date = document.getElementById('downtimeDate').value;
     const shift = document.getElementById('downtimeShift').value;
     const machine = document.getElementById('downtimeMachine').value;
@@ -3035,19 +2633,30 @@ async function recordDowntime() {
     const duration = parseInt(document.getElementById('downtimeDuration').value);
     const startTime = document.getElementById('downtimeStartTime').value;
     const endTime = document.getElementById('downtimeEndTime').value;
+    const workerName = document.getElementById('downtimeWorkerName').value.trim();
+
     if (!date || !shift || !machine || !downtimeType || !description || !duration || !startTime || !endTime) {
         showToast('Please fill all fields including start and end time', 'warning');
         return;
     }
+    if (downtimeType === 'Worker' && !workerName) {
+        showToast('Please enter the worker name', 'warning');
+        document.getElementById('downtimeWorkerName').focus();
+        return;
+    }
+
     const newRecord = {
         id: Date.now(), date, shift, machine, downtimeType, description,
         durationMinutes: duration, startTime, endTime,
+        workerName: (downtimeType === 'Worker') ? workerName : '',
         timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
     };
     downtimeDB.push(newRecord);
     await saveToServer('downtimeDB', downtimeDB);
     document.getElementById('downtimeForm').reset();
     document.getElementById('downtimeDate').value = getLocalDateStr();
+    const workerGroup = document.getElementById('workerNameGroup');
+    if (workerGroup) workerGroup.classList.add('hidden');
     updateStats(); renderDowntimeList(); renderDashboard();
     await updateIdealRatesFromActual();
     showToast('Downtime recorded successfully', 'success');
@@ -3064,46 +2673,38 @@ function renderDowntimeList() {
         records = records.filter(r =>
             (r.machine || '').toLowerCase().includes(search) ||
             (r.downtimeType || '').toLowerCase().includes(search) ||
-            (r.description || '').toLowerCase().includes(search)
+            (r.description || '').toLowerCase().includes(search) ||
+            (r.workerName || '').toLowerCase().includes(search)
         );
     }
     records.sort((a, b) => b.timestamp - a.timestamp);
-    if (records.length === 0) {
-        container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No downtime records entered today.</p>';
-        return;
-    }
+    if (records.length === 0) { container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No downtime records entered today.</p>'; return; }
     const canDelete = hasPermission('canDeleteDowntime');
-    container.innerHTML = records.map(r => `
-        <div class="card">
-            <div class="p-4">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h4 class="font-bold">${esc(r.machine)}</h4>
-                        <div class="flex gap-2 mt-2 flex-wrap">
-                            <span class="badge badge-danger">${esc(r.downtimeType)}</span>
-                            <span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift || 'N/A')}</span>
-                        </div>
-                    </div>
-                    <div class="text-right">
-                        <span class="block font-bold text-red-600">${r.durationMinutes} min</span>
-                        <span class="block text-xs text-gray-500">${esc(r.startTime || '')} - ${esc(r.endTime || '')}</span>
-                    </div>
-                </div>
-                <p class="text-sm text-gray-600 mt-3">${esc(r.description)}</p>
-                ${canDelete ? `<div class="flex justify-end mt-2"><button onclick="showDeleteDowntimeConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}
-            </div>
-        </div>
-    `).join('');
+    const typeLabels = {
+        'Machine': 'ماكينة (Machine)',
+        'Material': 'خامة (Material)',
+        'Worker': 'عامل (Worker)',
+        'Panel': 'لوحة (Panel)',
+        'Maintenance': 'Maintenance',
+        'Planning Load': 'Planning Load',
+        'Material Issue': 'Material Issue',
+        'Labor Shortage': 'Labor Shortage',
+        'Quality': 'Quality'
+    };
+    container.innerHTML = records.map(r => {
+        const typeLabel = typeLabels[r.downtimeType] || r.downtimeType;
+        const workerLine = (r.downtimeType === 'Worker' && r.workerName) ? `<p class="text-sm text-blue-700 mt-2"><i class="fa-solid fa-user mr-1"></i> ${esc(r.workerName)}</p>` : '';
+        return `<div class="card"><div class="p-4"><div class="flex justify-between items-start"><div><h4 class="font-bold">${esc(r.machine)}</h4><div class="flex gap-2 mt-2 flex-wrap"><span class="badge badge-danger">${esc(typeLabel)}</span><span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift || 'N/A')}</span></div></div><div class="text-right"><span class="block font-bold text-red-600">${r.durationMinutes} min</span><span class="block text-xs text-gray-500">${esc(r.startTime || '')} - ${esc(r.endTime || '')}</span></div></div>${workerLine}<p class="text-sm text-gray-600 mt-3">${esc(r.description)}</p>${canDelete ? `<div class="flex justify-end mt-2"><button onclick="showDeleteDowntimeConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}</div></div>`;
+    }).join('');
 }
 
 // ====== NCR ======
 async function populateNCRItems() {
     const woId = document.getElementById('ncrWorkOrder').value;
     const itemSelect = document.getElementById('ncrItem');
-    if (!woId) {
-        itemSelect.innerHTML = '<option value="" disabled selected>Select item...</option>';
-        return;
-    }
+    const itemSearchEl = document.getElementById('ncrItemSearch');
+    if (itemSearchEl) itemSearchEl.value = '';
+    if (!woId) { itemSelect.innerHTML = '<option value="" disabled selected>Select item...</option>'; return; }
     const wo = workOrdersDB.find(w => w.id == woId);
     if (!wo) return;
     itemSelect.innerHTML = '<option value="" disabled selected>Select item...</option>';
@@ -3116,10 +2717,7 @@ async function populateNCRItems() {
 }
 
 async function recordNCR() {
-    if (!hasPermission('canRecordNCR')) {
-        showToast('غير مسموح لك بتسجيل NCR', 'error');
-        return;
-    }
+    if (!hasPermission('canRecordNCR')) { showToast('غير مسموح لك بتسجيل NCR', 'error'); return; }
     const date = document.getElementById('ncrDate').value;
     const shift = document.getElementById('ncrShift').value;
     const machine = document.getElementById('ncrMachine').value;
@@ -3146,6 +2744,8 @@ async function recordNCR() {
     await saveToServer('ncrDB', ncrDB);
     document.getElementById('ncrForm').reset();
     document.getElementById('ncrDate').value = getLocalDateStr();
+    document.getElementById('ncrWorkOrderSearch').value = '';
+    document.getElementById('ncrItemSearch').value = '';
     document.getElementById('ncrWorkOrder').innerHTML = '<option value="" disabled selected>Select work order...</option>';
     document.getElementById('ncrItem').innerHTML = '<option value="" disabled selected>Select item...</option>';
     populateNCRWorkOrders();
@@ -3173,41 +2773,14 @@ function renderNCRList() {
         );
     }
     records.sort((a, b) => b.timestamp - a.timestamp);
-    if (records.length === 0) {
-        container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No NCR records this month.</p>';
-        return;
-    }
+    if (records.length === 0) { container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No NCR records this month.</p>'; return; }
     const canDelete = hasPermission('canDeleteNCR');
-    container.innerHTML = records.map(r => `
-        <div class="card">
-            <div class="p-4">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h4 class="font-bold">${esc(r.itemName)}</h4>
-                        <div class="flex gap-2 mt-2 flex-wrap">
-                            <span class="badge badge-danger">${esc(r.ncrType)}</span>
-                            <span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift)}</span>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-2"><i class="fa-solid fa-file-contract mr-1"></i> ${esc(r.workOrderName)}</p>
-                    </div>
-                    <div class="text-right">
-                        <span class="block font-bold text-red-600">${r.rejectedQty} pcs</span>
-                        <span class="block text-xs text-gray-500">${esc(r.machine)}</span>
-                    </div>
-                </div>
-                ${r.comment ? `<p class="text-sm text-gray-600 mt-3">${esc(r.comment)}</p>` : ''}
-                ${canDelete ? `<div class="flex justify-end mt-2"><button onclick="showDeleteNCRConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}
-            </div>
-        </div>
-    `).join('');
+    container.innerHTML = records.map(r => `<div class="card"><div class="p-4"><div class="flex justify-between items-start"><div><h4 class="font-bold">${esc(r.itemName)}</h4><div class="flex gap-2 mt-2 flex-wrap"><span class="badge badge-danger">${esc(r.ncrType)}</span><span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift)}</span></div><p class="text-xs text-gray-500 mt-2"><i class="fa-solid fa-file-contract mr-1"></i> ${esc(r.workOrderName)}</p></div><div class="text-right"><span class="block font-bold text-red-600">${r.rejectedQty} pcs</span><span class="block text-xs text-gray-500">${esc(r.machine)}</span></div></div>${r.comment ? `<p class="text-sm text-gray-600 mt-3">${esc(r.comment)}</p>` : ''}${canDelete ? `<div class="flex justify-end mt-2"><button onclick="showDeleteNCRConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}</div></div>`).join('');
 }
 
 // ====== HR Functions ======
 async function saveEmployee() {
-    if (!hasPermission('canManageEmployees')) {
-        showToast('غير مسموح لك بإدارة الموظفين', 'error');
-        return;
-    }
+    if (!hasPermission('canManageEmployees')) { showToast('غير مسموح لك بإدارة الموظفين', 'error'); return; }
     const empId = document.getElementById('empId').value.trim();
     const name = document.getElementById('empName').value.trim();
     if (!empId || !name) { showToast('Employee ID and Name are required', 'warning'); return; }
@@ -3222,13 +2795,8 @@ async function saveEmployee() {
         status: document.getElementById('empStatus').value,
         updatedAt: Date.now()
     };
-    if (existingIndex >= 0) {
-        employeesDB[existingIndex] = { ...employeesDB[existingIndex], ...employee };
-        showToast('Employee updated successfully', 'success');
-    } else {
-        employeesDB.push(employee);
-        showToast('Employee added successfully', 'success');
-    }
+    if (existingIndex >= 0) { employeesDB[existingIndex] = { ...employeesDB[existingIndex], ...employee }; showToast('Employee updated successfully', 'success'); }
+    else { employeesDB.push(employee); showToast('Employee added successfully', 'success'); }
     await saveToServer('employeesDB', employeesDB);
     renderEmployeesList(); resetEmployeeForm(); updateEmployeesStats();
 }
@@ -3285,40 +2853,14 @@ function renderEmployeesList() {
     const searchEl = document.getElementById('employeeSearch');
     const search = searchEl ? searchEl.value.toLowerCase().trim() : '';
     let list = employeesDB.slice();
-    if (search) {
-        list = list.filter(e =>
-            (e.name || '').toLowerCase().includes(search) ||
-            (e.id || '').toLowerCase().includes(search)
-        );
-    }
+    if (search) list = list.filter(e => (e.name || '').toLowerCase().includes(search) || (e.id || '').toLowerCase().includes(search));
     list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    if (list.length === 0) {
-        container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No employees. Add your first employee.</p>';
-        return;
-    }
+    if (list.length === 0) { container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No employees. Add your first employee.</p>'; return; }
     const canManage = hasPermission('canManageEmployees');
     container.innerHTML = list.map(e => {
         const idJs = esc(JSON.stringify(e.id));
         const statusClass = e.status === 'Active' ? 'badge-success' : (e.status === 'On Leave' ? 'badge-warning' : 'badge-secondary');
-        return `
-        <div class="card">
-            <div class="p-4 flex items-center gap-4">
-                <div class="bg-indigo-100 p-3 rounded-full"><i class="fa-solid fa-user text-indigo-600 text-xl"></i></div>
-                <div class="flex-1">
-                    <h4 class="font-bold">${esc(e.name)}</h4>
-                    <div class="flex gap-2 mt-2 flex-wrap">
-                        <span class="badge badge-primary">${esc(e.id)}</span>
-                        <span class="badge badge-info">${esc(e.department || '-')}</span>
-                        <span class="badge ${statusClass}">${esc(e.status || 'Active')}</span>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-2">${esc(e.position || '-')} · ${esc(e.shift || '-')}${e.phone ? ' · ' + esc(e.phone) : ''}</p>
-                </div>
-                ${canManage ? `<div class="flex flex-col gap-2">
-                    <button onclick="editEmployee(${idJs})" class="text-blue-500 hover:text-blue-700 text-sm"><i class="fa-solid fa-pen"></i></button>
-                    <button onclick="showDeleteEmployeeConfirmation(${idJs})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button>
-                </div>` : ''}
-            </div>
-        </div>`;
+        return `<div class="card"><div class="p-4 flex items-center gap-4"><div class="bg-indigo-100 p-3 rounded-full"><i class="fa-solid fa-user text-indigo-600 text-xl"></i></div><div class="flex-1"><h4 class="font-bold">${esc(e.name)}</h4><div class="flex gap-2 mt-2 flex-wrap"><span class="badge badge-primary">${esc(e.id)}</span><span class="badge badge-info">${esc(e.department || '-')}</span><span class="badge ${statusClass}">${esc(e.status || 'Active')}</span></div><p class="text-xs text-gray-500 mt-2">${esc(e.position || '-')} · ${esc(e.shift || '-')}${e.phone ? ' · ' + esc(e.phone) : ''}</p></div>${canManage ? `<div class="flex flex-col gap-2"><button onclick="editEmployee(${idJs})" class="text-blue-500 hover:text-blue-700 text-sm"><i class="fa-solid fa-pen"></i></button><button onclick="showDeleteEmployeeConfirmation(${idJs})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}</div></div>`;
     }).join('');
 }
 
@@ -3341,10 +2883,7 @@ function updateOperatorsDropdown() {
 }
 
 function showOperatorsManagement() {
-    if (!hasPermission('canManageOperators')) {
-        showToast('غير مسموح لك بإدارة العاملين', 'error');
-        return;
-    }
+    if (!hasPermission('canManageOperators')) { showToast('غير مسموح لك بإدارة العاملين', 'error'); return; }
     const modal = document.createElement('div');
     modal.className = 'modal active';
     modal.innerHTML = `<div class="modal-content" style="max-width:600px"><div class="modal-header"><h3 class="text-lg font-bold"><i class="fa-solid fa-users mr-2"></i> Machine Operators Management</h3><button onclick="this.closest('.modal').remove()" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="space-y-4"><div class="input-group"><label class="input-label">Select Machine</label><select id="operatorMachineSelect" class="input-field" onchange="loadOperatorsForMachine()"><option value="" disabled selected>Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Finishing">Finishing</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option></select></div><div id="operatorsListContainer" class="hidden"><div class="flex justify-between items-center mb-2"><label class="input-label">Operators</label><button onclick="addOperatorField()" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> Add</button></div><div id="operatorsList" class="space-y-2"></div><button onclick="saveOperators()" class="btn btn-secondary w-full mt-4">Save Operators</button></div></div></div></div>`;
@@ -3461,9 +3000,7 @@ function calculateActualIdealRates() {
     const prodMap = new Map();
     productionDB.forEach(rec => {
         const key = `${rec.machine}_${rec.shift}_${rec.date}`;
-        if (!prodMap.has(key)) {
-            prodMap.set(key, { quantity: 0, machine: rec.machine, shift: rec.shift, date: rec.date });
-        }
+        if (!prodMap.has(key)) prodMap.set(key, { quantity: 0, machine: rec.machine, shift: rec.shift, date: rec.date });
         prodMap.get(key).quantity += rec.quantity;
     });
     const downtimeMap = new Map();
@@ -3500,10 +3037,7 @@ async function updateIdealRatesFromActual() {
     let updated = false;
     for (let [machine, rate] of Object.entries(calculated)) {
         if (!manual[machine]) {
-            if (machineIdealRates[machine] !== rate) {
-                machineIdealRates[machine] = rate;
-                updated = true;
-            }
+            if (machineIdealRates[machine] !== rate) { machineIdealRates[machine] = rate; updated = true; }
         }
     }
     if (updated) {
@@ -3514,22 +3048,19 @@ async function updateIdealRatesFromActual() {
 }
 
 function showIdealRatesManagement() {
-    if (!hasPermission('canViewReports')) {
-        showToast('غير مسموح لك بعرض إعدادات السرعات المثالية', 'error');
-        return;
-    }
+    if (!hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض إعدادات السرعات المثالية', 'error'); return; }
     const modal = document.createElement('div');
     modal.className = 'modal active';
     const machines = ['206', '20.20', '10.10', 'Cropping', 'Manual Plasma', 'Press', 'Drill', 'Chamfering', 'Shear', '83P', 'CNC Bending', 'Finishing'];
     const calculatedRates = calculateActualIdealRates();
-    let html = `<div class="modal-content" style="max-width:700px"> <div class="modal-header"> <h3 class="text-lg font-bold"><i class="fa-solid fa-gauge-high mr-2"></i> ${translations[currentLanguage].manageIdealRates}</h3> <button onclick="this.closest('.modal').remove()" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i></button> </div> <div class="modal-body"> <div class="mb-4 p-3 bg-blue-50 rounded-lg text-sm"> <i class="fa-solid fa-info-circle mr-2"></i> The rates below are calculated automatically from actual production records. </div> <div class="space-y-3" id="idealRatesList">`;
+    let html = `<div class="modal-content" style="max-width:700px"><div class="modal-header"><h3 class="text-lg font-bold"><i class="fa-solid fa-gauge-high mr-2"></i> ${translations[currentLanguage].manageIdealRates}</h3><button onclick="this.closest('.modal').remove()" class="btn btn-outline btn-sm"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="mb-4 p-3 bg-blue-50 rounded-lg text-sm"><i class="fa-solid fa-info-circle mr-2"></i> The rates below are calculated automatically from actual production records. </div><div class="space-y-3" id="idealRatesList">`;
     machines.forEach(m => {
         const currentRate = machineIdealRates[m] || '';
         const calculatedRate = calculatedRates[m] || 'N/A';
         const displayCalc = calculatedRate !== 'N/A' ? `${calculatedRate} pcs/hr` : 'No data';
-        html += `<div class="input-group"> <label class="input-label">${m}</label> <input type="number" id="idealRate_${m.replace(/ /g, '_')}" class="input-field" value="${currentRate}" placeholder="${translations[currentLanguage].idealRate}" step="1" min="0"> <div class="text-xs text-gray-500 mt-1">Calculated average: ${displayCalc}</div> </div>`;
+        html += `<div class="input-group"><label class="input-label">${m}</label><input type="number" id="idealRate_${m.replace(/ /g, '_')}" class="input-field" value="${currentRate}" placeholder="${translations[currentLanguage].idealRate}" step="1" min="0"><div class="text-xs text-gray-500 mt-1">Calculated average: ${displayCalc}</div></div>`;
     });
-    html += `<div class="flex gap-2 mt-4"> <button onclick="updateIdealRatesFromActualAndCloseModal()" class="btn btn-secondary flex-1"><i class="fa-solid fa-calculator"></i> Calculate from Actual Data</button> <button onclick="saveIdealRates()" class="btn btn-primary flex-1"><i class="fa-solid fa-save"></i> ${translations[currentLanguage].saveIdealRates}</button> </div> </div></div></div>`;
+    html += `<div class="flex gap-2 mt-4"><button onclick="updateIdealRatesFromActualAndCloseModal()" class="btn btn-secondary flex-1"><i class="fa-solid fa-calculator"></i> Calculate from Actual Data</button><button onclick="saveIdealRates()" class="btn btn-primary flex-1"><i class="fa-solid fa-save"></i> ${translations[currentLanguage].saveIdealRates}</button></div></div></div></div>`;
     modal.innerHTML = html;
     document.body.appendChild(modal);
 }
@@ -3636,10 +3167,7 @@ function calculateOEEAndTEEPForMachine(machine, startDate, endDate) {
 // ====== Reports Generation ======
 function selectReportType(type) {
     const user = getCurrentUser();
-    if (!user || !hasPermission('canViewReports')) {
-        showToast('غير مسموح لك بعرض التقارير', 'error');
-        return;
-    }
+    if (!user || !hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض التقارير', 'error'); return; }
     if (type === 'ncrReport' && user.role !== ROLES.QC && user.role !== ROLES.PRODUCTION && user.role !== ROLES.ADMINISTRATOR) {
         showToast('هذا التقرير مخصص لإدارة الجودة أو الإنتاج', 'warning');
         return;
@@ -3649,116 +3177,22 @@ function selectReportType(type) {
     let html = '';
     switch (type) {
         case 'itemsStatus':
-            html = `<div class="card p-4">
-                <h3 class="text-lg font-bold mb-4">${translations[currentLanguage].itemsStatusReport || 'Items Status Report'}</h3>
-                <p class="text-sm text-gray-500 mb-3">${translations[currentLanguage].detailedStatus || 'Get detailed status of items in a specific work order'}</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div class="input-group">
-                        <label class="input-label">${translations[currentLanguage].selectWorkOrder || 'Select Work Order'}</label>
-                        <select id="reportWorkOrder" class="input-field"></select>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Search Work Order Number</label>
-                        <input type="text" id="reportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterWorkOrderSelect()">
-                    </div>
-                </div>
-                <button onclick="generateItemsStatusReport()" class="btn btn-primary mt-4">${translations[currentLanguage].generateItemsStatus || 'Generate Items Status Report'}</button>
-            </div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${translations[currentLanguage].itemsStatusReport || 'Items Status Report'}</h3><p class="text-sm text-gray-500 mb-3">${translations[currentLanguage].detailedStatus || 'Get detailed status of items in a specific work order'}</p><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">${translations[currentLanguage].selectWorkOrder || 'Select Work Order'}</label><select id="reportWorkOrder" class="input-field"></select></div><div class="input-group"><label class="input-label">Search Work Order Number</label><input type="text" id="reportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterWorkOrderSelect()"></div></div><button onclick="generateItemsStatusReport()" class="btn btn-primary mt-4">${translations[currentLanguage].generateItemsStatus || 'Generate Items Status Report'}</button></div>`;
             break;
         case 'detailedItem':
-            html = `<div class="card p-4">
-                <h3 class="text-lg font-bold mb-4">Detailed Item Report</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div class="input-group">
-                        <label class="input-label">Select Work Order</label>
-                        <select id="detailReportWorkOrder" class="input-field" onchange="populateItemsForReport()"></select>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Search Work Order</label>
-                        <input type="text" id="detailReportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterDetailWorkOrderSelect()">
-                    </div>
-                </div>
-                <div id="itemSelectionContainer" class="hidden">
-                    <div class="input-group mt-4">
-                        <label class="input-label">Search Item</label>
-                        <input type="text" id="detailItemSearchInput" class="input-field" onkeyup="filterItemsForReport()" placeholder="Search item...">
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Select Item</label>
-                        <select id="detailReportItem" class="input-field"></select>
-                    </div>
-                </div>
-                <button onclick="generateDetailedItemReport()" class="btn btn-primary mt-4">Generate Report</button>
-            </div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Detailed Item Report</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">Select Work Order</label><select id="detailReportWorkOrder" class="input-field" onchange="populateItemsForReport()"></select></div><div class="input-group"><label class="input-label">Search Work Order</label><input type="text" id="detailReportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterDetailWorkOrderSelect()"></div></div><div id="itemSelectionContainer" class="hidden"><div class="input-group mt-4"><label class="input-label">Search Item</label><input type="text" id="detailItemSearchInput" class="input-field" onkeyup="filterItemsForReport()" placeholder="Search item..."></div><div class="input-group"><label class="input-label">Select Item</label><select id="detailReportItem" class="input-field"></select></div></div><button onclick="generateDetailedItemReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
             break;
         case 'dailyProduction':
-            html = `<div class="card p-4"> <h3 class="text-lg font-bold mb-4">Daily Production Report</h3> <div class="grid grid-cols-2 gap-4"> <div class="input-group"><label class="input-label" data-i18n="fromDate">From Date</label><input type="date" id="dailyReportFromDate" class="input-field"></div> <div class="input-group"><label class="input-label" data-i18n="toDate">To Date</label><input type="date" id="dailyReportToDate" class="input-field"></div> </div> <div class="grid grid-cols-2 gap-4"> <div class="input-group"><label class="input-label" data-i18n="operationPhase">Operation Phase</label> <select id="dailyReportPhase" class="input-field" onchange="updateDailyReportMachines()"> <option value="">All Phases</option> <option value="minimum">Minimum</option> <option value="crop">Cropping</option> <option value="shear">Shearing</option> <option value="bend">Bending</option> <option value="drill">Drilling</option> <option value="chamfer">Chamfering</option> <option value="finish">Finishing</option> </select> </div> <div class="input-group"><label class="input-label" data-i18n="shift">Shift</label> <select id="dailyReportShift" class="input-field"> <option value="">All Shifts</option> <option value="First Shift">First Shift</option> <option value="Second Shift">Second Shift</option> <option value="Third Shift">Third Shift</option> </select> </div> </div> <div class="grid grid-cols-2 gap-4"> <div class="input-group"><label class="input-label" data-i18n="machineName">Machine Name</label> <select id="dailyReportMachine" class="input-field"> <option value="">All Machines</option> </select> </div> <div class="input-group"><label class="input-label" data-i18n="workOrderName">Work Order</label> <select id="dailyReportWorkOrder" class="input-field"> <option value="">All Work Orders</option> </select> </div> </div> <button onclick="generateDailyProductionReport()" class="btn btn-primary mt-4">Generate Report</button> </div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Daily Production Report</h3><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="fromDate">From Date</label><input type="date" id="dailyReportFromDate" class="input-field"></div><div class="input-group"><label class="input-label" data-i18n="toDate">To Date</label><input type="date" id="dailyReportToDate" class="input-field"></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="operationPhase">Operation Phase</label><select id="dailyReportPhase" class="input-field" onchange="updateDailyReportMachines()"><option value="">All Phases</option><option value="minimum">Minimum</option><option value="crop">Cropping</option><option value="shear">Shearing</option><option value="bend">Bending</option><option value="drill">Drilling</option><option value="chamfer">Chamfering</option><option value="finish">Finishing</option></select></div><div class="input-group"><label class="input-label" data-i18n="shift">Shift</label><select id="dailyReportShift" class="input-field"><option value="">All Shifts</option><option value="First Shift">First Shift</option><option value="Second Shift">Second Shift</option><option value="Third Shift">Third Shift</option></select></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="machineName">Machine Name</label><select id="dailyReportMachine" class="input-field"><option value="">All Machines</option></select></div><div class="input-group"><label class="input-label" data-i18n="workOrderName">Work Order</label><select id="dailyReportWorkOrder" class="input-field"><option value="">All Work Orders</option></select></div></div><button onclick="generateDailyProductionReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
             break;
         case 'operationStatus':
-            html = `<div class="card p-4">
-                <h3 class="text-lg font-bold mb-4">Operation Status Report</h3>
-                <div class="input-group">
-                    <label class="input-label">Sales Order</label>
-                    <select id="operationSalesOrder" class="input-field" onchange="populateWorkOrdersForOperation()">
-                        <option value="">All Sales Orders</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label class="input-label">Operation Phase</label>
-                    <select id="operationPhase" class="input-field" onchange="populateWorkOrdersForOperation()">
-                        <option value="">All Phases</option>
-                        <option value="minimum">Minimum</option>
-                        <option value="crop">Cropping</option>
-                        <option value="shear">Shearing</option>
-                        <option value="bend">Bending</option>
-                        <option value="drill">Drilling</option>
-                        <option value="chamfer">Chamfering</option>
-                        <option value="finish">Finishing</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label class="input-label">Work Order</label>
-                    <select id="operationWorkOrder" class="input-field">
-                        <option value="">All Work Orders</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label class="input-label">Status Filter</label>
-                    <select id="operationStatusFilter" class="input-field">
-                        <option value="All">All</option>
-                        <option value="Done">Done</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Ready">Ready</option>
-                        <option value="Pending">Pending</option>
-                    </select>
-                </div>
-                <div id="machineCategoryContainer">
-                    <div class="input-group">
-                        <label class="input-label">Machine Category</label>
-                        <select id="operationMachineCategory" class="input-field">
-                            <option value="all">All</option>
-                            <option value="angles">Angles</option>
-                            <option value="plates">Plates</option>
-                        </select>
-                    </div>
-                </div>
-                <button onclick="generateOperationStatusReport()" class="btn btn-primary mt-4">Generate Report</button>
-            </div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Operation Status Report</h3><div class="input-group"><label class="input-label">Sales Order</label><select id="operationSalesOrder" class="input-field" onchange="populateWorkOrdersForOperation()"><option value="">All Sales Orders</option></select></div><div class="input-group"><label class="input-label">Operation Phase</label><select id="operationPhase" class="input-field" onchange="populateWorkOrdersForOperation()"><option value="">All Phases</option><option value="minimum">Minimum</option><option value="crop">Cropping</option><option value="shear">Shearing</option><option value="bend">Bending</option><option value="drill">Drilling</option><option value="chamfer">Chamfering</option><option value="finish">Finishing</option></select></div><div class="input-group"><label class="input-label">Work Order</label><select id="operationWorkOrder" class="input-field"><option value="">All Work Orders</option></select></div><div class="input-group"><label class="input-label">Status Filter</label><select id="operationStatusFilter" class="input-field"><option value="All">All</option><option value="Done">Done</option><option value="In Progress">In Progress</option><option value="Ready">Ready</option><option value="Pending">Pending</option></select></div><div id="machineCategoryContainer"><div class="input-group"><label class="input-label">Machine Category</label><select id="operationMachineCategory" class="input-field"><option value="all">All</option><option value="angles">Angles</option><option value="plates">Plates</option></select></div></div><button onclick="generateOperationStatusReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
             break;
         case 'shortage':
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Shortage Report</h3><div class="input-group"><label class="input-label">Select Work Order</label><select id="shortageWorkOrder" class="input-field"><option value="">All Work Orders</option></select></div><button onclick="generateShortageReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
             break;
         case 'downtime':
-            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Downtime Report</h3><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">From Date</label><input type="date" id="downtimeReportFromDate" class="input-field"></div><div class="input-group"><label class="input-label">To Date</label><input type="date" id="downtimeReportToDate" class="input-field"></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">Phase</label><select id="downtimeReportPhase" class="input-field"><option value="">All Phases</option><option value="minimum">Minimum</option><option value="cropping">Cropping</option><option value="shearing">Shearing</option><option value="bending">Bending</option><option value="chamfering">Chamfering</option></select></div><div class="input-group"><label class="input-label">Downtime Type</label>
-                <select id="downtimeReportType" class="input-field">
-                    <option value="">All Types</option>
-                    <option value="Maintenance">Maintenance</option>
-                    <option value="Planning Load">Planning Load</option>
-                    <option value="Material Issue">Material Issue</option>
-                    <option value="Labor Shortage">Labor Shortage</option>
-                    <option value="Quality">Quality</option>
-                </select>
-            </div></div><button onclick="generateDowntimeReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Downtime Report</h3><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">From Date</label><input type="date" id="downtimeReportFromDate" class="input-field"></div><div class="input-group"><label class="input-label">To Date</label><input type="date" id="downtimeReportToDate" class="input-field"></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">Phase</label><select id="downtimeReportPhase" class="input-field"><option value="">All Phases</option><option value="minimum">Minimum</option><option value="cropping">Cropping</option><option value="shearing">Shearing</option><option value="bending">Bending</option><option value="chamfering">Chamfering</option></select></div><div class="input-group"><label class="input-label">Fault Type</label><select id="downtimeReportType" class="input-field"><option value="">All Types</option><option value="Machine">ماكينة - Machine</option><option value="Material">خامة - Material</option><option value="Worker">عامل - Worker</option><option value="Panel">لوحة - Panel</option></select></div></div><button onclick="generateDowntimeReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
             break;
         case 'ncrReport':
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">NCR Report</h3><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">From Date</label><input type="date" id="ncrReportFromDate" class="input-field"></div><div class="input-group"><label class="input-label">To Date</label><input type="date" id="ncrReportToDate" class="input-field"></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">Machine</label><select id="ncrReportMachine" class="input-field"><option value="">All Machines</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div><div class="input-group"><label class="input-label">NCR Type</label><select id="ncrReportType" class="input-field"><option value="">All Types</option><option value="Scrap">Scrap</option><option value="Accept as it is">Accept as it is</option><option value="Repair">Repair</option></select></div></div><button onclick="generateNCRReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
@@ -3773,56 +3207,22 @@ function selectReportType(type) {
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${(translations[currentLanguage].stageSummaryReport) || 'Project Stage Summary'}</h3><div class="input-group"><label class="input-label">${(translations[currentLanguage].selectSalesOrder) || 'Select Sales Order'}</label><select id="stageSummarySO" class="input-field" onchange="generateProjectStageSummary()"><option value="">${(translations[currentLanguage].allSalesOrders) || 'All Sales Orders'}</option></select></div><button onclick="generateProjectStageSummary()" class="btn btn-primary mt-4"><i class="fa-solid fa-layer-group mr-2"></i>${(translations[currentLanguage].generateStageSummary) || 'Generate Stage Summary'}</button></div>`;
             break;
         case 'minimumStoppage':
-            html = `<div class="card p-4">
-                <h3 class="text-lg font-bold mb-4">${(translations[currentLanguage].minStoppageReport) || 'Stopped After Minimum'}</h3>
-                <p class="text-sm text-gray-500 mb-3">${(translations[currentLanguage].minStoppageDesc) || 'Items that completed Minimum but are pending in later stages'}</p>
-                <div class="input-group">
-                    <label class="input-label">${(translations[currentLanguage].selectSalesOrder) || 'Select Sales Order'}</label>
-                    <select id="minStopSO" class="input-field" onchange="generateMinimumStoppageReport()">
-                        <option value="">${(translations[currentLanguage].allSalesOrders) || 'All Sales Orders'}</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label class="input-label">Category</label>
-                    <select id="minStopCategory" class="input-field" onchange="generateMinimumStoppageReport()">
-                        <option value="all">All</option>
-                        <option value="angles">Angles</option>
-                        <option value="plates">Plates</option>
-                    </select>
-                </div>
-                <button onclick="generateMinimumStoppageReport()" class="btn btn-primary mt-4">
-                    <i class="fa-solid fa-circle-stop mr-2"></i>${(translations[currentLanguage].generateReport) || 'Generate Report'}
-                </button>
-            </div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${(translations[currentLanguage].minStoppageReport) || 'Stopped After Minimum'}</h3><p class="text-sm text-gray-500 mb-3">${(translations[currentLanguage].minStoppageDesc) || 'Items that completed Minimum but are pending in later stages'}</p><div class="input-group"><label class="input-label">${(translations[currentLanguage].selectSalesOrder) || 'Select Sales Order'}</label><select id="minStopSO" class="input-field" onchange="generateMinimumStoppageReport()"><option value="">${(translations[currentLanguage].allSalesOrders) || 'All Sales Orders'}</option></select></div><div class="input-group"><label class="input-label">Category</label><select id="minStopCategory" class="input-field" onchange="generateMinimumStoppageReport()"><option value="all">All</option><option value="angles">Angles</option><option value="plates">Plates</option></select></div><button onclick="generateMinimumStoppageReport()" class="btn btn-primary mt-4"><i class="fa-solid fa-circle-stop mr-2"></i>${(translations[currentLanguage].generateReport) || 'Generate Report'}</button></div>`;
             break;
         case 'monthlyProduction':
-            html = `<div class="card p-4"> <h3 class="text-lg font-bold mb-4">${translations[currentLanguage].monthlyProductionReport || 'Monthly Production Report'}</h3> <p class="text-sm text-gray-500 mb-4">${translations[currentLanguage].monthlyReportDesc || 'Daily Minimum & Finish vs target (22 tons), with cumulative efficiency'}</p> <div class="flex items-center gap-4"> <label class="text-sm font-medium">${translations[currentLanguage].month || 'Month'}:</label> <input type="month" id="monthlyReportMonth" class="input-field w-48" value="${new Date().toISOString().slice(0, 7)}" /> <button onclick="generateMonthlyProductionReport()" class="btn btn-primary"><i class="fa-solid fa-file-alt"></i> ${translations[currentLanguage].generateMonthlyReport || 'Generate Monthly Report'}</button> </div> </div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${translations[currentLanguage].monthlyProductionReport || 'Monthly Production Report'}</h3><p class="text-sm text-gray-500 mb-4">${translations[currentLanguage].monthlyReportDesc || 'Daily Minimum & Finish vs target (22 tons), with cumulative efficiency'}</p><div class="flex items-center gap-4"><label class="text-sm font-medium">${translations[currentLanguage].month || 'Month'}:</label><input type="month" id="monthlyReportMonth" class="input-field w-48" value="${new Date().toISOString().slice(0, 7)}" /><button onclick="generateMonthlyProductionReport()" class="btn btn-primary"><i class="fa-solid fa-file-alt"></i> ${translations[currentLanguage].generateMonthlyReport || 'Generate Monthly Report'}</button></div></div>`;
             break;
         default: return;
     }
     container.innerHTML = html;
     container.classList.remove('hidden');
-    if (type === 'ncrReport') {
-        document.getElementById('ncrReportFromDate').value = getLocalDateStr();
-        document.getElementById('ncrReportToDate').value = getLocalDateStr();
-    }
-    if (type === 'oeeReport') {
-        document.getElementById('oeeReportFromDate').value = getLocalDateStr();
-        document.getElementById('oeeReportToDate').value = getLocalDateStr();
-    }
-    if (type === 'teepReport') {
-        document.getElementById('teepReportFromDate').value = getLocalDateStr();
-        document.getElementById('teepReportToDate').value = getLocalDateStr();
-    }
+    if (type === 'ncrReport') { document.getElementById('ncrReportFromDate').value = getLocalDateStr(); document.getElementById('ncrReportToDate').value = getLocalDateStr(); }
+    if (type === 'oeeReport') { document.getElementById('oeeReportFromDate').value = getLocalDateStr(); document.getElementById('oeeReportToDate').value = getLocalDateStr(); }
+    if (type === 'teepReport') { document.getElementById('teepReportFromDate').value = getLocalDateStr(); document.getElementById('teepReportToDate').value = getLocalDateStr(); }
     if (type === 'itemsStatus' || type === 'detailedItem') {
         populateReportDropdowns();
-        if (type === 'itemsStatus') {
-            const searchInput = document.getElementById('reportWorkOrderSearch');
-            if (searchInput) searchInput.value = '';
-        } else {
-            const searchInput = document.getElementById('detailReportWorkOrderSearch');
-            if (searchInput) searchInput.value = '';
-        }
+        if (type === 'itemsStatus') { const s = document.getElementById('reportWorkOrderSearch'); if (s) s.value = ''; }
+        else { const s = document.getElementById('detailReportWorkOrderSearch'); if (s) s.value = ''; }
     }
     if (type === 'dailyProduction') {
         populateDailyReportWorkOrders();
@@ -3830,17 +3230,11 @@ function selectReportType(type) {
         document.getElementById('dailyReportFromDate').value = getLocalDateStr();
         document.getElementById('dailyReportToDate').value = getLocalDateStr();
     }
-    if (type === 'operationStatus') {
-        fillSalesOrderSelect('operationSalesOrder');
-        populateWorkOrdersForOperation();
-    }
+    if (type === 'operationStatus') { fillSalesOrderSelect('operationSalesOrder'); populateWorkOrdersForOperation(); }
     if (type === 'projectStageSummary') { populateStageSummarySalesOrders(); generateProjectStageSummary(); }
     if (type === 'minimumStoppage') { fillSalesOrderSelect('minStopSO'); generateMinimumStoppageReport(); }
     if (type === 'shortage') populateShortageWorkOrders();
-    if (type === 'downtime') {
-        document.getElementById('downtimeReportFromDate').value = getLocalDateStr();
-        document.getElementById('downtimeReportToDate').value = getLocalDateStr();
-    }
+    if (type === 'downtime') { document.getElementById('downtimeReportFromDate').value = getLocalDateStr(); document.getElementById('downtimeReportToDate').value = getLocalDateStr(); }
 }
 
 function populateMachinesDropdown(phase) {
@@ -3885,17 +3279,11 @@ function filterItemsForReport() {
 
 // ====== Generate Reports ======
 async function generateItemsStatusReport() {
-    if (!hasPermission('canViewReports')) {
-        showToast('غير مسموح لك بعرض التقارير', 'error');
-        return;
-    }
+    if (!hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض التقارير', 'error'); return; }
     const woValue = document.getElementById('reportWorkOrder') ? document.getElementById('reportWorkOrder').value : null;
     let selectedWOs = [];
     if (!woValue || woValue === 'all') selectedWOs = workOrdersDB;
-    else {
-        const wo = workOrdersDB.find(w => w.id === parseInt(woValue));
-        if (wo) selectedWOs = [wo];
-    }
+    else { const wo = workOrdersDB.find(w => w.id === parseInt(woValue)); if (wo) selectedWOs = [wo]; }
     if (selectedWOs.length === 0) { showToast('No work orders found', 'warning'); return; }
     showLoading(translations[currentLanguage].processing || 'Processing...');
     await yieldToUI();
@@ -3912,18 +3300,12 @@ async function generateItemsStatusReport() {
         document.getElementById('reportTitle').textContent = `Items Status Report - ${titleSuffix}`;
         const header = document.getElementById('reportTableHeader');
         const body = document.getElementById('reportTableBody');
-        header.innerHTML = `<tr>
-         <th>#</th><th>Item Name</th><th>Section</th><th>Steel Grade</th>
-         <th>Project Name</th><th>Sales Order #</th><th>Quantity</th>
-         <th>Completed</th><th>Remaining</th><th>Status</th>
-         <th>Operations</th><th>Completion Dates</th>
-     </tr>`;
+        header.innerHTML = `<tr><th>#</th><th>Item Name</th><th>Section</th><th>Steel Grade</th><th>Project Name</th><th>Sales Order #</th><th>Quantity</th><th>Completed</th><th>Remaining</th><th>Status</th><th>Operations</th><th>Completion Dates</th></tr>`;
         const rows = [];
         let globalIndex = 0;
         for (const wo of selectedWOs) {
             wo.items.forEach((item) => {
-                let opsHtml = '';
-                let datesHtml = '';
+                let opsHtml = '', datesHtml = '';
                 item.operations.forEach(op => {
                     const comp = item.completedOperations[op.name];
                     const compQty = comp ? comp.completedQuantity : 0;
@@ -3939,54 +3321,29 @@ async function generateItemsStatusReport() {
                 });
                 const statusClass = item.status === 'Completed' ? 'status-completed' : (item.status === 'In Progress' ? 'status-in-progress' : 'status-pending');
                 globalIndex++;
-                rows.push(`<tr>
-                 <td class="text-center">${globalIndex}</td>
-                 <td class="font-bold">${item.itemName}</td>
-                 <td>${item.section}</td>
-                 <td class="text-center">${item.steelGrade || '-'}</td>
-                 <td class="text-center">${wo.projectName}</td>
-                 <td class="text-center">${wo.salesOrderNumber}</td>
-                 <td class="text-center">${item.quantity}</td>
-                 <td class="text-center">${item.completedQuantity || 0}</td>
-                 <td class="text-center">${item.quantity - (item.completedQuantity || 0)}</td>
-                 <td class="text-center"><span class="status-indicator ${statusClass}">${item.status}</span></td>
-                 <td class="text-center">${opsHtml}</td>
-                 <td class="text-center">${datesHtml}</td>
-             </tr>`);
+                rows.push(`<tr><td class="text-center">${globalIndex}</td><td class="font-bold">${item.itemName}</td><td>${item.section}</td><td class="text-center">${item.steelGrade || '-'}</td><td class="text-center">${wo.projectName}</td><td class="text-center">${wo.salesOrderNumber}</td><td class="text-center">${item.quantity}</td><td class="text-center">${item.completedQuantity || 0}</td><td class="text-center">${item.quantity - (item.completedQuantity || 0)}</td><td class="text-center"><span class="status-indicator ${statusClass}">${item.status}</span></td><td class="text-center">${opsHtml}</td><td class="text-center">${datesHtml}</td></tr>`);
             });
         }
         body.innerHTML = rows.join('');
         document.getElementById('reportResults').classList.remove('hidden');
         document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
         showToast('Items status report generated', 'success');
-    } catch (err) {
-        console.error(err);
-        showToast('Error generating report', 'error');
-    } finally {
-        hideLoading();
-    }
+    } catch (err) { console.error(err); showToast('Error generating report', 'error'); }
+    finally { hideLoading(); }
 }
 
 async function generateDetailedItemReport() {
-    if (!hasPermission('canViewReports')) {
-        showToast('غير مسموح لك بعرض التقارير', 'error');
-        return;
-    }
+    if (!hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض التقارير', 'error'); return; }
     const woId = document.getElementById('detailReportWorkOrder') ? document.getElementById('detailReportWorkOrder').value : null;
     const itemIdx = document.getElementById('detailReportItem') ? document.getElementById('detailReportItem').value : null;
     if (!woId || itemIdx === '') { showToast('Please select work order and item', 'warning'); return; }
     const wo = workOrdersDB.find(w => w.id === parseInt(woId));
     if (!wo || !wo.items[itemIdx]) { showToast('Item not found', 'error'); return; }
     const item = wo.items[itemIdx];
-    const sectionDisplay = item.section || '-';
-    const lengthDisplay = item.length || '-';
-    document.getElementById('reportTitle').textContent = `Detailed Item Report - ${item.itemName} (${sectionDisplay}, Length: ${lengthDisplay}) | WO: ${wo.workOrderName} | SO: ${wo.salesOrderNumber}`;
+    document.getElementById('reportTitle').textContent = `Detailed Item Report - ${item.itemName} (${item.section || '-'}, Length: ${item.length || '-'}) | WO: ${wo.workOrderName} | SO: ${wo.salesOrderNumber}`;
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
-    header.innerHTML = `<tr>
-        <th>#</th><th>Operation</th><th>Machine</th><th>Required</th>
-        <th>Completed</th><th>Remaining</th><th>Status</th><th>Production Records</th>
-    </tr>`;
+    header.innerHTML = `<tr><th>#</th><th>Operation</th><th>Machine</th><th>Required</th><th>Completed</th><th>Remaining</th><th>Status</th><th>Production Records</th></tr>`;
     const prodRecords = productionDB.filter(r => r.workOrderId === parseInt(woId) && r.itemName === item.itemName);
     const recordsByOp = new Map();
     for (const r of prodRecords) {
@@ -4004,27 +3361,9 @@ async function generateDetailedItemReport() {
         if (!recHtml) recHtml = '<div class="text-xs text-gray-500 p-1">No production records</div>';
         const statusClass = isComp ? 'status-completed' : (compQty > 0 ? 'status-in-progress' : 'status-pending');
         const statusText = isComp ? 'Completed' : (compQty > 0 ? 'In Progress' : 'Pending');
-        rows.push(`<tr>
-            <td class="text-center">${idx + 1}</td>
-            <td class="font-bold">${op.name}</td>
-            <td class="text-center">${op.machine}</td>
-            <td class="text-center">${item.quantity}</td>
-            <td class="text-center">${compQty}</td>
-            <td class="text-center">${item.quantity - compQty}</td>
-            <td class="text-center"><span class="status-indicator ${statusClass}">${statusText}</span></td>
-            <td class="text-center">${recHtml}</td>
-        </tr>`);
+        rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="font-bold">${op.name}</td><td class="text-center">${op.machine}</td><td class="text-center">${item.quantity}</td><td class="text-center">${compQty}</td><td class="text-center">${item.quantity - compQty}</td><td class="text-center"><span class="status-indicator ${statusClass}">${statusText}</span></td><td class="text-center">${recHtml}</td></tr>`);
     });
-    rows.push(`<tr class="summary-row">
-        <td class="text-center"></td>
-        <td class="font-bold text-center">Item Summary</td>
-        <td class="text-center">—</td>
-        <td class="font-bold text-center">${item.quantity}</td>
-        <td class="font-bold text-center">${item.completedQuantity || 0}</td>
-        <td class="font-bold text-center">${item.quantity - (item.completedQuantity || 0)}</td>
-        <td class="font-bold text-center">${item.status}</td>
-        <td class="font-bold text-center">Total Production Records: ${prodRecords.length}</td>
-    </tr>`);
+    rows.push(`<tr class="summary-row"><td class="text-center"></td><td class="font-bold text-center">Item Summary</td><td class="text-center">—</td><td class="font-bold text-center">${item.quantity}</td><td class="font-bold text-center">${item.completedQuantity || 0}</td><td class="font-bold text-center">${item.quantity - (item.completedQuantity || 0)}</td><td class="font-bold text-center">${item.status}</td><td class="font-bold text-center">Total Production Records: ${prodRecords.length}</td></tr>`);
     body.innerHTML = rows.join('');
     document.getElementById('reportResults').classList.remove('hidden');
     document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
@@ -4032,10 +3371,7 @@ async function generateDetailedItemReport() {
 }
 
 function generateDailyProductionReport() {
-    if (!hasPermission('canViewReports')) {
-        showToast('غير مسموح لك بعرض التقارير', 'error');
-        return;
-    }
+    if (!hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض التقارير', 'error'); return; }
     const from = document.getElementById('dailyReportFromDate').value;
     const to = document.getElementById('dailyReportToDate').value;
     const shift = document.getElementById('dailyReportShift').value;
@@ -4046,8 +3382,7 @@ function generateDailyProductionReport() {
     showLoading(translations[currentLanguage].processing || 'Processing...');
     setTimeout(() => {
         try {
-            const fromDate = new Date(from);
-            const toDate = new Date(to);
+            const fromDate = new Date(from), toDate = new Date(to);
             const woIdInt = woId ? parseInt(woId) : null;
             let filtered = productionDB.filter(r => {
                 const d = new Date(r.date);
@@ -4068,45 +3403,24 @@ function generateDailyProductionReport() {
             const body = document.getElementById('reportTableBody');
             header.innerHTML = '<tr><th>#</th><th>Date</th><th>Shift</th><th>Work Order</th><th>Item Name</th><th>Section</th><th>Operation</th><th>Machine</th><th>Operator</th><th>Quantity</th><th>Weight Produced</th></tr>';
             let html = '';
-            if (filtered.length === 0) {
-                html = '<tr><td colspan="11" class="text-center py-4">No production records found</td></tr>';
-            } else {
+            if (filtered.length === 0) html = '<tr><td colspan="11" class="text-center py-4">No production records found</td></tr>';
+            else {
                 let totalQty = 0, totalWt = 0;
                 for (let i = 0; i < filtered.length; i++) {
                     const r = filtered[i];
                     totalQty += r.quantity;
                     const weight = parseFloat(r.producedWeight) || 0;
                     totalWt += weight;
-                    html += '<tr>' +
-                        '<td class="text-center">' + (i + 1) + '</td>' +
-                        '<td class="text-center">' + r.date + '</td>' +
-                        '<td class="text-center">' + r.shift + '</td>' +
-                        '<td class="text-center">' + r.workOrderName + '</td>' +
-                        '<td class="font-bold">' + r.itemName + '</td>' +
-                        '<td class="text-center">' + (r.itemSection || '-') + '</td>' +
-                        '<td class="text-center">' + r.operation + '</td>' +
-                        '<td class="text-center">' + r.machine + '</td>' +
-                        '<td class="text-center">' + (r.operator || '-') + '</td>' +
-                        '<td class="font-bold text-purple-700">' + r.quantity + '</td>' +
-                        '<td class="font-bold text-green-700">' + weight + ' kg</td>' +
-                        '</tr>';
+                    html += '<tr><td class="text-center">' + (i + 1) + '</td><td class="text-center">' + r.date + '</td><td class="text-center">' + r.shift + '</td><td class="text-center">' + r.workOrderName + '</td><td class="font-bold">' + r.itemName + '</td><td class="text-center">' + (r.itemSection || '-') + '</td><td class="text-center">' + r.operation + '</td><td class="text-center">' + r.machine + '</td><td class="text-center">' + (r.operator || '-') + '</td><td class="font-bold text-purple-700">' + r.quantity + '</td><td class="font-bold text-green-700">' + weight + ' kg</td></tr>';
                 }
-                html += '<tr class="total-row">' +
-                    '<td colspan="9" class="font-bold text-right">Totals:</td>' +
-                    '<td class="font-bold text-purple-700">' + totalQty + '</td>' +
-                    '<td class="font-bold text-green-700">' + totalWt.toFixed(2) + ' kg</td>' +
-                    '</tr>';
+                html += '<tr class="total-row"><td colspan="9" class="font-bold text-right">Totals:</td><td class="font-bold text-purple-700">' + totalQty + '</td><td class="font-bold text-green-700">' + totalWt.toFixed(2) + ' kg</td></tr>';
             }
             body.innerHTML = html;
             document.getElementById('reportResults').classList.remove('hidden');
             document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
             showToast('Daily production report generated', 'success');
-        } catch (err) {
-            console.error(err);
-            showToast('Error generating report', 'error');
-        } finally {
-            hideLoading();
-        }
+        } catch (err) { console.error(err); showToast('Error generating report', 'error'); }
+        finally { hideLoading(); }
     }, 50);
 }
 
@@ -4123,11 +3437,7 @@ async function generateOperationStatusReport() {
     document.getElementById('reportTitle').textContent = title;
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
-    header.innerHTML = `<tr>
-        <th>#</th><th>Work Order</th><th>Sales Order</th><th>Project</th>
-        <th>Item Name</th><th>Section</th><th>Operation</th><th>Machine</th>
-        <th>Required</th><th>Weight (kg)</th><th>Completed</th><th>Remaining</th><th>Status</th>
-    </tr>`;
+    header.innerHTML = `<tr><th>#</th><th>Work Order</th><th>Sales Order</th><th>Project</th><th>Item Name</th><th>Section</th><th>Operation</th><th>Machine</th><th>Required</th><th>Weight (kg)</th><th>Completed</th><th>Remaining</th><th>Status</th></tr>`;
     showLoading(translations[currentLanguage].processing || 'Processing...');
     await yieldToUI();
     try {
@@ -4145,13 +3455,8 @@ async function generateOperationStatusReport() {
                     const isComp = compQty >= it.quantity;
                     const phaseMatch = !phase || getOperationPhase(op.name) === phase;
                     let catMatch = true;
-                    if (machineCat === 'angles') {
-                        const section = it.section.toString().trim().toUpperCase();
-                        if (!section.startsWith('L')) catMatch = false;
-                    } else if (machineCat === 'plates') {
-                        const section = it.section.toString().trim().toUpperCase();
-                        if (!(section.startsWith('P') || section.startsWith('F'))) catMatch = false;
-                    }
+                    if (machineCat === 'angles') { const section = it.section.toString().trim().toUpperCase(); if (!section.startsWith('L')) catMatch = false; }
+                    else if (machineCat === 'plates') { const section = it.section.toString().trim().toUpperCase(); if (!(section.startsWith('P') || section.startsWith('F'))) catMatch = false; }
                     if (phaseMatch && catMatch) {
                         let status = '';
                         if (isComp) status = 'Done';
@@ -4159,25 +3464,16 @@ async function generateOperationStatusReport() {
                         else status = prevOk ? 'Ready' : 'Pending';
                         if (statusFilter === 'All' || status === statusFilter) {
                             const weight = it.totalWeight || (it.weightPerPiece * it.quantity) || 0;
-                            items.push({
-                                woName: wo.workOrderName, salesOrder: wo.salesOrderNumber, proj: wo.projectName,
-                                itemName: it.itemName, section: it.section, opName: op.name, machine: op.machine,
-                                required: it.quantity, weight: weight, completed: compQty,
-                                remaining: it.quantity - compQty, status: status
-                            });
-                            totalReq += it.quantity;
-                            totalWt += weight;
-                            totalComp += compQty;
-                            totalRem += (it.quantity - compQty);
+                            items.push({ woName: wo.workOrderName, salesOrder: wo.salesOrderNumber, proj: wo.projectName, itemName: it.itemName, section: it.section, opName: op.name, machine: op.machine, required: it.quantity, weight: weight, completed: compQty, remaining: it.quantity - compQty, status: status });
+                            totalReq += it.quantity; totalWt += weight; totalComp += compQty; totalRem += (it.quantity - compQty);
                         }
                     }
                     if (!isComp) prevOk = false;
                 });
             });
         });
-        if (items.length === 0) {
-            body.innerHTML = '<tr><td colspan="13" class="text-center py-4">No items found</td></tr>';
-        } else {
+        if (items.length === 0) body.innerHTML = '<tr><td colspan="13" class="text-center py-4">No items found</td></tr>';
+        else {
             const order = { 'Done': 1, 'In Progress': 2, 'Ready': 3, 'Pending': 4 };
             items.sort((a, b) => order[a.status] - order[b.status] || a.woName.localeCompare(b.woName));
             const rows = [];
@@ -4187,41 +3483,16 @@ async function generateOperationStatusReport() {
                 else if (it.status === 'In Progress') cls = 'status-in-progress';
                 else if (it.status === 'Ready') cls = 'badge badge-info';
                 else cls = 'status-pending';
-                rows.push(`<tr>
-                    <td class="text-center">${idx + 1}</td>
-                    <td class="text-center">${it.woName}</td>
-                    <td class="text-center">${it.salesOrder}</td>
-                    <td class="text-center">${it.proj}</td>
-                    <td class="font-bold">${it.itemName}</td>
-                    <td class="text-center">${it.section}</td>
-                    <td class="text-center">${it.opName}</td>
-                    <td class="text-center">${it.machine}</td>
-                    <td class="text-center">${it.required}</td>
-                    <td class="text-center">${it.weight.toFixed(2)}</td>
-                    <td class="text-center">${it.completed}</td>
-                    <td class="text-center">${it.remaining}</td>
-                    <td class="text-center"><span class="${cls}">${it.status}</span></td>
-                </tr>`);
+                rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${it.woName}</td><td class="text-center">${it.salesOrder}</td><td class="text-center">${it.proj}</td><td class="font-bold">${it.itemName}</td><td class="text-center">${it.section}</td><td class="text-center">${it.opName}</td><td class="text-center">${it.machine}</td><td class="text-center">${it.required}</td><td class="text-center">${it.weight.toFixed(2)}</td><td class="text-center">${it.completed}</td><td class="text-center">${it.remaining}</td><td class="text-center"><span class="${cls}">${it.status}</span></td></tr>`);
             });
-            rows.push(`<tr class="total-row">
-                <td colspan="8" class="font-bold text-right">Totals:</td>
-                <td class="font-bold">${totalReq}</td>
-                <td class="font-bold">${totalWt.toFixed(2)} kg</td>
-                <td class="font-bold">${totalComp}</td>
-                <td class="font-bold">${totalRem}</td>
-                <td class="font-bold"></td>
-            </tr>`);
+            rows.push(`<tr class="total-row"><td colspan="8" class="font-bold text-right">Totals:</td><td class="font-bold">${totalReq}</td><td class="font-bold">${totalWt.toFixed(2)} kg</td><td class="font-bold">${totalComp}</td><td class="font-bold">${totalRem}</td><td class="font-bold"></td></tr>`);
             body.innerHTML = rows.join('');
         }
         document.getElementById('reportResults').classList.remove('hidden');
         document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
         showToast('Operation status report generated', 'success');
-    } catch (err) {
-        console.error(err);
-        showToast('Error generating report', 'error');
-    } finally {
-        hideLoading();
-    }
+    } catch (err) { console.error(err); showToast('Error generating report', 'error'); }
+    finally { hideLoading(); }
 }
 
 function generateShortageReport() {
@@ -4241,9 +3512,8 @@ function generateShortageReport() {
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
     header.innerHTML = `<tr><th>#</th><th>Work Order</th><th>Project</th><th>Item Name</th><th>Section</th><th>Total Qty</th><th>Completed</th><th>Remaining</th><th>Status</th></tr>`;
-    if (shortages.length === 0) {
-        body.innerHTML = '<tr><td colspan="9" class="text-center py-4">No shortage items found</td></tr>';
-    } else {
+    if (shortages.length === 0) body.innerHTML = '<tr><td colspan="9" class="text-center py-4">No shortage items found</td></tr>';
+    else {
         const rows = [];
         shortages.forEach((s, idx) => {
             const cls = s.status === 'Completed' ? 'status-completed' : (s.status === 'In Progress' ? 'status-in-progress' : 'status-pending');
@@ -4262,8 +3532,7 @@ function generateDowntimeReport() {
     const phase = document.getElementById('downtimeReportPhase').value;
     const type = document.getElementById('downtimeReportType').value;
     if (!from || !to) { showToast('Please select date range', 'warning'); return; }
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
+    const fromDate = new Date(from), toDate = new Date(to);
     let filtered = downtimeDB.filter(r => {
         const d = new Date(r.date);
         if (d < fromDate || d > toDate) return false;
@@ -4275,17 +3544,17 @@ function generateDowntimeReport() {
     document.getElementById('reportTitle').textContent = `Downtime Report (${from} to ${to})`;
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
-    header.innerHTML = `<tr><th>#</th><th>Date</th><th>Shift</th><th>Machine</th><th>Downtime Type</th><th>Description</th><th>Duration (min)</th></tr>`;
-    if (filtered.length === 0) {
-        body.innerHTML = '<tr><td colspan="7" class="text-center py-4">No downtime records found</td></tr>';
-    } else {
+    header.innerHTML = `<tr><th>#</th><th>Date</th><th>Shift</th><th>Machine</th><th>Fault Type</th><th>Worker Name</th><th>Description</th><th>Duration (min)</th></tr>`;
+    if (filtered.length === 0) body.innerHTML = '<tr><td colspan="8" class="text-center py-4">No downtime records found</td></tr>';
+    else {
         let totalDur = 0;
         const rows = [];
         filtered.forEach((r, idx) => {
             totalDur += r.durationMinutes;
-            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${r.date}</td><td class="text-center">${r.shift || '-'}</td><td class="text-center">${r.machine}</td><td class="text-center">${r.downtimeType}</td><td class="text-center">${r.description || '-'}</td><td class="font-bold text-red-600">${r.durationMinutes}</td></tr>`);
+            const worker = (r.downtimeType === 'Worker' && r.workerName) ? esc(r.workerName) : '-';
+            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${r.date}</td><td class="text-center">${r.shift || '-'}</td><td class="text-center">${r.machine}</td><td class="text-center">${r.downtimeType}</td><td class="text-center font-bold text-blue-700">${worker}</td><td class="text-center">${r.description || '-'}</td><td class="font-bold text-red-600">${r.durationMinutes}</td></tr>`);
         });
-        rows.push(`<tr class="total-row"><td colspan="6" class="font-bold text-right">Total Downtime:</td><td class="font-bold text-red-600">${totalDur} minutes (${(totalDur / 60).toFixed(2)} hours)</td></tr>`);
+        rows.push(`<tr class="total-row"><td colspan="7" class="font-bold text-right">Total Downtime:</td><td class="font-bold text-red-600">${totalDur} minutes (${(totalDur / 60).toFixed(2)} hours)</td></tr>`);
         body.innerHTML = rows.join('');
     }
     document.getElementById('reportResults').classList.remove('hidden');
@@ -4309,8 +3578,7 @@ function generateNCRReport() {
     const machine = document.getElementById('ncrReportMachine').value;
     const ncrType = document.getElementById('ncrReportType').value;
     if (!fromDate || !toDate) { showToast('Please select date range', 'warning'); return; }
-    const fromD = new Date(fromDate);
-    const toD = new Date(toDate);
+    const fromD = new Date(fromDate), toD = new Date(toDate);
     let filtered = ncrDB.filter(rec => {
         const recDate = new Date(rec.date);
         if (recDate < fromD || recDate > toD) return false;
@@ -4323,9 +3591,8 @@ function generateNCRReport() {
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
     header.innerHTML = `<tr><th>#</th><th>Date</th><th>Shift</th><th>Machine</th><th>Work Order</th><th>Item Name</th><th>Rejected Qty</th><th>NCR Type</th><th>Comment</th></tr>`;
-    if (filtered.length === 0) {
-        body.innerHTML = '<tr><td colspan="9" class="text-center py-4">No NCR records found</td></tr>';
-    } else {
+    if (filtered.length === 0) body.innerHTML = '<tr><td colspan="9" class="text-center py-4">No NCR records found</td></tr>';
+    else {
         let totalRejected = 0;
         const rows = [];
         filtered.forEach((rec, idx) => {
@@ -4351,24 +3618,15 @@ function generateOEEReport() {
     for (const m of machines) {
         const metrics = calculateOEEAndTEEPForMachine(m, fromDate, toDate);
         if (metrics && metrics.totalPlannedMinutes > 0) {
-            results.push({
-                machine: m,
-                availability: (metrics.availability * 100).toFixed(1),
-                performance: (metrics.performance * 100).toFixed(1),
-                quality: (metrics.quality * 100).toFixed(1),
-                oee: (metrics.oee * 100).toFixed(1),
-                totalProduced: metrics.totalProduced,
-                totalRejected: metrics.totalRejected
-            });
+            results.push({ machine: m, availability: (metrics.availability * 100).toFixed(1), performance: (metrics.performance * 100).toFixed(1), quality: (metrics.quality * 100).toFixed(1), oee: (metrics.oee * 100).toFixed(1), totalProduced: metrics.totalProduced, totalRejected: metrics.totalRejected });
         }
     }
     document.getElementById('reportTitle').textContent = `OEE Report (${fromDate} to ${toDate})`;
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
     header.innerHTML = `<tr><th>#</th><th>Machine</th><th>Availability (%)</th><th>Performance (%)</th><th>Quality (%)</th><th>OEE (%)</th><th>Total Produced</th><th>Total Rejected</th></tr>`;
-    if (results.length === 0) {
-        body.innerHTML = '<tr><td colspan="8" class="text-center py-4">No OEE data available for the selected period</td></tr>';
-    } else {
+    if (results.length === 0) body.innerHTML = '<tr><td colspan="8" class="text-center py-4">No OEE data available for the selected period</td></tr>';
+    else {
         const rows = [];
         results.forEach((res, idx) => {
             let oeeColor = '';
@@ -4395,25 +3653,15 @@ function generateTEEPReport() {
     for (const m of machines) {
         const metrics = calculateOEEAndTEEPForMachine(m, fromDate, toDate);
         if (metrics && metrics.totalPlannedMinutes > 0) {
-            results.push({
-                machine: m,
-                oee: (metrics.oee * 100).toFixed(1),
-                teep: (metrics.teep * 100).toFixed(1),
-                utilization: (metrics.utilization * 100).toFixed(1),
-                totalProduced: metrics.totalProduced,
-                totalRejected: metrics.totalRejected,
-                plannedMinutes: metrics.totalPlannedMinutes,
-                calendarMinutes: metrics.totalCalendarMinutes
-            });
+            results.push({ machine: m, oee: (metrics.oee * 100).toFixed(1), teep: (metrics.teep * 100).toFixed(1), utilization: (metrics.utilization * 100).toFixed(1), totalProduced: metrics.totalProduced, totalRejected: metrics.totalRejected, plannedMinutes: metrics.totalPlannedMinutes, calendarMinutes: metrics.totalCalendarMinutes });
         }
     }
     document.getElementById('reportTitle').textContent = `TEEP Report (${fromDate} to ${toDate})`;
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
     header.innerHTML = `<tr><th>#</th><th>Machine</th><th>OEE (%)</th><th>Utilization (%)</th><th>TEEP (%)</th><th>Total Produced</th><th>Total Rejected</th><th>Planned (hrs)</th><th>Calendar (hrs)</th></tr>`;
-    if (results.length === 0) {
-        body.innerHTML = '<tr><td colspan="9" class="text-center py-4">No TEEP data available for the selected period</td></tr>';
-    } else {
+    if (results.length === 0) body.innerHTML = '<tr><td colspan="9" class="text-center py-4">No TEEP data available for the selected period</td></tr>';
+    else {
         const rows = [];
         results.forEach((res, idx) => {
             let teepColor = '';
@@ -4444,12 +3692,8 @@ async function generateProjectStageSummary() {
         document.getElementById('reportResults').classList.remove('hidden');
         document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
         showToast('Project stage summary generated', 'success');
-    } catch (err) {
-        console.error(err);
-        showToast('Error generating report', 'error');
-    } finally {
-        hideLoading();
-    }
+    } catch (err) { console.error(err); showToast('Error generating report', 'error'); }
+    finally { hideLoading(); }
 }
 
 async function generateMinimumStoppageReport() {
@@ -4492,69 +3736,27 @@ async function generateMinimumStoppageReport() {
                 let categoryLabel = 'Other';
                 if (section.startsWith('L')) categoryLabel = 'Angle';
                 else if (section.startsWith('P') || section.startsWith('F')) categoryLabel = 'Plate';
-                rows.push({
-                    salesOrder: wo.salesOrderNumber || '-', woName: wo.workOrderName,
-                    itemName: item.itemName, section: item.section || '-',
-                    category: categoryLabel, qty: qty, wt: wt,
-                    stage: stuck.name, machine: stuck.machine || '-', stuckDone: stuckDone
-                });
+                rows.push({ salesOrder: wo.salesOrderNumber || '-', woName: wo.workOrderName, itemName: item.itemName, section: item.section || '-', category: categoryLabel, qty: qty, wt: wt, stage: stuck.name, machine: stuck.machine || '-', stuckDone: stuckDone });
             });
         });
-        rows.sort((a, b) =>
-            String(a.stage).localeCompare(String(b.stage)) ||
-            String(a.woName).localeCompare(String(b.woName)) ||
-            String(a.itemName).localeCompare(String(b.itemName))
-        );
+        rows.sort((a, b) => String(a.stage).localeCompare(String(b.stage)) || String(a.woName).localeCompare(String(b.woName)) || String(a.itemName).localeCompare(String(b.itemName)));
         const scopeLabel = soFilter ? ('SO ' + soFilter) : ((translations[currentLanguage].allSalesOrders) || 'All Sales Orders');
         document.getElementById('reportTitle').textContent = `WIP After Minimum - ${scopeLabel}`;
         const header = document.getElementById('reportTableHeader');
         const body = document.getElementById('reportTableBody');
-        header.innerHTML = `<tr>
-            <th>#</th><th>Sales Order</th><th>Work Order</th><th>Item Name</th>
-            <th>Section</th><th>Category</th><th>Quantity</th><th>Weight (kg)</th>
-            <th>Stopped At Stage</th><th>Machine</th><th>Stage Progress</th>
-        </tr>`;
-        if (rows.length === 0) {
-            body.innerHTML = '<tr><td colspan="11" class="text-center py-4">No items found — no items have completed Minimum while still pending a later stage.</td></tr>';
-        } else {
+        header.innerHTML = `<tr><th>#</th><th>Sales Order</th><th>Work Order</th><th>Item Name</th><th>Section</th><th>Category</th><th>Quantity</th><th>Weight (kg)</th><th>Stopped At Stage</th><th>Machine</th><th>Stage Progress</th></tr>`;
+        if (rows.length === 0) body.innerHTML = '<tr><td colspan="11" class="text-center py-4">No items found — no items have completed Minimum while still pending a later stage.</td></tr>';
+        else {
             const fmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
-            const out = rows.map((r, i) => `<tr>
-                <td class="text-center">${i + 1}</td>
-                <td class="text-center">${esc(r.salesOrder)}</td>
-                <td class="text-center">${esc(r.woName)}</td>
-                <td class="font-bold">${esc(r.itemName)}</td>
-                <td class="text-center">${esc(r.section)}</td>
-                <td class="text-center"><span class="badge ${r.category === 'Angle' ? 'badge-primary' : (r.category === 'Plate' ? 'badge-warning' : 'badge-secondary')}">${esc(r.category)}</span></td>
-                <td class="text-center">${fmtInt(r.qty)}</td>
-                <td class="text-center">${fmtInt(r.wt)}</td>
-                <td class="text-center"><span class="status-indicator status-in-progress">${esc(r.stage)}</span></td>
-                <td class="text-center">${esc(r.machine)}</td>
-                <td class="text-center">${fmtInt(r.stuckDone)} / ${fmtInt(r.qty)}</td>
-            </tr>`);
-            out.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;">
-                <td class="text-center"></td>
-                <td class="text-center"></td>
-                <td class="text-center font-bold">TOTAL</td>
-                <td class="text-center font-bold">${fmtInt(rows.length)} item(s)</td>
-                <td class="text-center"></td>
-                <td class="text-center"></td>
-                <td class="text-center font-bold">${fmtInt(totalQty)}</td>
-                <td class="text-center font-bold">${fmtInt(totalWt)}</td>
-                <td class="text-center"></td>
-                <td class="text-center"></td>
-                <td class="text-center"></td>
-            </tr>`);
+            const out = rows.map((r, i) => `<tr><td class="text-center">${i + 1}</td><td class="text-center">${esc(r.salesOrder)}</td><td class="text-center">${esc(r.woName)}</td><td class="font-bold">${esc(r.itemName)}</td><td class="text-center">${esc(r.section)}</td><td class="text-center"><span class="badge ${r.category === 'Angle' ? 'badge-primary' : (r.category === 'Plate' ? 'badge-warning' : 'badge-secondary')}">${esc(r.category)}</span></td><td class="text-center">${fmtInt(r.qty)}</td><td class="text-center">${fmtInt(r.wt)}</td><td class="text-center"><span class="status-indicator status-in-progress">${esc(r.stage)}</span></td><td class="text-center">${esc(r.machine)}</td><td class="text-center">${fmtInt(r.stuckDone)} / ${fmtInt(r.qty)}</td></tr>`);
+            out.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;"><td class="text-center"></td><td class="text-center"></td><td class="text-center font-bold">TOTAL</td><td class="text-center font-bold">${fmtInt(rows.length)} item(s)</td><td class="text-center"></td><td class="text-center"></td><td class="text-center font-bold">${fmtInt(totalQty)}</td><td class="text-center font-bold">${fmtInt(totalWt)}</td><td class="text-center"></td><td class="text-center"></td><td class="text-center"></td></tr>`);
             body.innerHTML = out.join('');
         }
         document.getElementById('reportResults').classList.remove('hidden');
         document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
         showToast('Report generated', 'success');
-    } catch (err) {
-        console.error(err);
-        showToast('Error generating report', 'error');
-    } finally {
-        hideLoading();
-    }
+    } catch (err) { console.error(err); showToast('Error generating report', 'error'); }
+    finally { hideLoading(); }
 }
 
 // ====== Export Functions ======
@@ -4578,11 +3780,7 @@ function exportWorkOrderToExcel() {
                 return `${op.name} (${compQty}/${it.quantity})`;
             }).join('; ');
         }
-        data.push([
-            idx + 1, it.itemName, it.section, it.steelGrade || '-', it.length || '-',
-            it.quantity, it.weightPerPiece || 0, it.totalWeight || 0, opsText,
-            it.completedQuantity || 0, it.quantity - (it.completedQuantity || 0), it.status
-        ]);
+        data.push([idx + 1, it.itemName, it.section, it.steelGrade || '-', it.length || '-', it.quantity, it.weightPerPiece || 0, it.totalWeight || 0, opsText, it.completedQuantity || 0, it.quantity - (it.completedQuantity || 0), it.status]);
     });
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -4632,10 +3830,7 @@ function exportReportToExcel() {
     const rows = Array.from(document.querySelectorAll('#reportTableBody tr')).map(tr =>
         Array.from(tr.querySelectorAll('td')).map((td, c) => {
             const text = td.textContent;
-            if (weightCols[c]) {
-                const n = toNumber(text);
-                if (n !== null) return n;
-            }
+            if (weightCols[c]) { const n = toNumber(text); if (n !== null) return n; }
             return text;
         })
     );
@@ -4654,37 +3849,22 @@ function exportReportToPdf() {
     const titleEl = document.getElementById('reportTitle');
     const title = titleEl ? titleEl.textContent : 'Report';
     const headers = Array.from(document.querySelectorAll('#reportTableHeader th')).map(th => th.textContent.trim());
-    const rows = Array.from(document.querySelectorAll('#reportTableBody tr')).map(tr =>
-        Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim())
-    );
+    const rows = Array.from(document.querySelectorAll('#reportTableBody tr')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()));
     if (headers.length === 0 || rows.length === 0) { showToast('No report to export', 'warning'); return; }
     const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
-    if (!jsPDFCtor) {
-        showToast('PDF library not loaded — opening print dialog (choose "Save as PDF")', 'warning');
-        printReport();
-        return;
-    }
+    if (!jsPDFCtor) { showToast('PDF library not loaded — opening print dialog (choose "Save as PDF")', 'warning'); printReport(); return; }
     try {
         const doc = new jsPDFCtor({ orientation: 'landscape', unit: 'pt', format: 'a4' });
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
-        doc.setFontSize(14);
-        doc.setTextColor(26, 35, 126);
+        doc.setFontSize(14); doc.setTextColor(26, 35, 126);
         doc.text('Tower Manufacturing Management System', pageWidth / 2, 30, { align: 'center' });
-        doc.setFontSize(11);
-        doc.setTextColor(40, 40, 40);
+        doc.setFontSize(11); doc.setTextColor(40, 40, 40);
         doc.text(title, pageWidth / 2, 48, { align: 'center' });
-        doc.setFontSize(8);
-        doc.setTextColor(120, 120, 120);
+        doc.setFontSize(8); doc.setTextColor(120, 120, 120);
         doc.text('@2026 Created by Walid Ahmed Yosuf   |   Generated: ' + new Date().toLocaleString(), pageWidth / 2, 62, { align: 'center' });
-        const autoTableFn = (typeof doc.autoTable === 'function')
-            ? doc.autoTable.bind(doc)
-            : ((window.jspdf && typeof window.jspdf.autoTable === 'function') ? (opts) => window.jspdf.autoTable(doc, opts) : null);
-        if (!autoTableFn) {
-            showToast('PDF table plugin not loaded — opening print dialog (choose "Save as PDF")', 'warning');
-            printReport();
-            return;
-        }
+        const autoTableFn = (typeof doc.autoTable === 'function') ? doc.autoTable.bind(doc) : ((window.jspdf && typeof window.jspdf.autoTable === 'function') ? (opts) => window.jspdf.autoTable(doc, opts) : null);
+        if (!autoTableFn) { showToast('PDF table plugin not loaded', 'warning'); printReport(); return; }
         autoTableFn({
             head: [headers], body: rows, startY: 75,
             margin: { left: 20, right: 20 },
@@ -4695,34 +3875,25 @@ function exportReportToPdf() {
                 if (data.section === 'body') {
                     const r = rows[data.row.index] || [];
                     const joined = r.join(' ').toUpperCase();
-                    if (joined.indexOf('TOTAL') !== -1) {
-                        data.cell.styles.fillColor = [254, 243, 199];
-                        data.cell.styles.fontStyle = 'bold';
-                    }
+                    if (joined.indexOf('TOTAL') !== -1) { data.cell.styles.fillColor = [254, 243, 199]; data.cell.styles.fontStyle = 'bold'; }
                 }
             },
             didDrawPage: function () {
-                doc.setFontSize(7);
-                doc.setTextColor(150, 150, 150);
+                doc.setFontSize(7); doc.setTextColor(150, 150, 150);
                 doc.text('Confidential - Tower Manufacturing Management System   |   Page ' + doc.internal.getNumberOfPages(), pageWidth / 2, pageHeight - 12, { align: 'center' });
             }
         });
         const safeName = title.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
         doc.save('Report_' + safeName + '_' + new Date().toISOString().split('T')[0] + '.pdf');
         showToast('Report exported to PDF', 'success');
-    } catch (err) {
-        console.error('PDF export failed:', err);
-        showToast('PDF export failed — opening print dialog (choose "Save as PDF")', 'error');
-        printReport();
-    }
+    } catch (err) { console.error('PDF export failed:', err); showToast('PDF export failed', 'error'); printReport(); }
 }
 
 function printReport() {
     const title = document.getElementById('reportTitle').textContent;
     const headers = Array.from(document.querySelectorAll('#reportTableHeader th')).map(th => th.textContent);
     const rows = Array.from(document.querySelectorAll('#reportTableBody tr')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent));
-    let woInfo = '';
-    let woId = null;
+    let woInfo = '', woId = null;
     if (document.getElementById('reportWorkOrder') && document.getElementById('reportWorkOrder').value) woId = parseInt(document.getElementById('reportWorkOrder').value);
     else if (document.getElementById('detailReportWorkOrder') && document.getElementById('detailReportWorkOrder').value) woId = parseInt(document.getElementById('detailReportWorkOrder').value);
     if (woId) { const wo = workOrdersDB.find(w => w.id === woId); if (wo) woInfo = `Project: ${wo.projectName} | Work Order: ${wo.workOrderName} | Sales Order: ${wo.salesOrderNumber}`; }
@@ -4771,10 +3942,7 @@ function switchTab(tab) {
         production: 'canViewProduction', downtime: 'canViewDowntime', ncr: 'canViewNCR',
         hr: 'canViewHR', reports: 'canViewReports', settings: 'canViewSettings'
     };
-    if (!hasPermission(permissionMap[tab])) {
-        showToast('غير مسموح لك بالدخول إلى هذا القسم', 'error');
-        return;
-    }
+    if (!hasPermission(permissionMap[tab])) { showToast('غير مسموح لك بالدخول إلى هذا القسم', 'error'); return; }
     if (tab === 'settings') { showSettingsPanel(); return; }
     document.querySelectorAll('section[id$="Section"]').forEach(s => s.classList.add('hidden'));
     document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
@@ -4782,9 +3950,24 @@ function switchTab(tab) {
     document.querySelector(`.sidebar-tab[data-tab="${tab}"]`).classList.add('active');
     if (tab === 'workOrder') populateTowerTypeDropdown();
     else if (tab === 'production') { populateProductionTowerTypeDropdown(); loadProductionPreferences(); renderProductionList(); }
-    else if (tab === 'reports') { /* handled by card clicks */ }
-    else if (tab === 'downtime') { document.getElementById('downtimeDate').value = getLocalDateStr(); renderDowntimeList(); }
-    else if (tab === 'ncr') { document.getElementById('ncrDate').value = getLocalDateStr(); populateNCRWorkOrders(); renderNCRList(); }
+    else if (tab === 'reports') { }
+    else if (tab === 'downtime') {
+        document.getElementById('downtimeDate').value = getLocalDateStr();
+        const workerGroup = document.getElementById('workerNameGroup');
+        const workerInput = document.getElementById('downtimeWorkerName');
+        if (workerGroup) workerGroup.classList.add('hidden');
+        if (workerInput) { workerInput.value = ''; workerInput.required = false; }
+        renderDowntimeList();
+    }
+    else if (tab === 'ncr') {
+        document.getElementById('ncrDate').value = getLocalDateStr();
+        const woSearch = document.getElementById('ncrWorkOrderSearch');
+        const itemSearch = document.getElementById('ncrItemSearch');
+        if (woSearch) woSearch.value = '';
+        if (itemSearch) itemSearch.value = '';
+        populateNCRWorkOrders();
+        renderNCRList();
+    }
     else if (tab === 'hr') { renderEmployeesList(); updateEmployeesStats(); }
     else if (tab === 'dashboard') renderDashboard();
     applyPermissionsToCurrentSection();
@@ -4844,7 +4027,6 @@ function checkScheduledBackup() { if (appConfig.backupSchedule === 'none') retur
 function setBackupScheduleInterval() { setInterval(checkScheduledBackup, 60 * 60 * 1000); }
 function exportBackup() { createBackup(); }
 
-// ====== Confirmation Dialogs ======
 function showConfirmationDialog(title, msg, action, data) {
     document.getElementById('confirmationTitle').textContent = title;
     document.getElementById('confirmationMessage').innerHTML = msg;
@@ -4854,9 +4036,7 @@ function showConfirmationDialog(title, msg, action, data) {
 }
 
 async function confirmAction() {
-    if (pendingDeleteAction && pendingDeleteData) {
-        await pendingDeleteAction(pendingDeleteData);
-    }
+    if (pendingDeleteAction && pendingDeleteData) await pendingDeleteAction(pendingDeleteData);
     hideModal('confirmationModal');
     pendingDeleteAction = null;
     pendingDeleteData = null;
@@ -4867,11 +4047,7 @@ function showDeleteProductionConfirmation(id) {
     const t = translations[currentLanguage];
     const rec = productionDB.find(r => r.id === id);
     if (!rec) return;
-    showConfirmationDialog(
-        t.deleteRecord,
-        `${t.areYouSureDeleteProduction}<br><br><strong>${esc(rec.itemName)}</strong><br>${esc(rec.operation)} - ${rec.quantity} pieces<br>${rec.date} - ${rec.shift}`,
-        deleteProductionRecord, id
-    );
+    showConfirmationDialog(t.deleteRecord, `${t.areYouSureDeleteProduction}<br><br><strong>${esc(rec.itemName)}</strong><br>${esc(rec.operation)} - ${rec.quantity} pieces<br>${rec.date} - ${rec.shift}`, deleteProductionRecord, id);
 }
 
 function showDeleteWorkOrderConfirmation(id) {
@@ -4879,11 +4055,7 @@ function showDeleteWorkOrderConfirmation(id) {
     const t = translations[currentLanguage];
     const wo = workOrdersDB.find(w => w.id === id);
     if (!wo) return;
-    showConfirmationDialog(
-        t.deleteWorkOrder,
-        `${t.areYouSureDeleteWorkOrder}<br><br><strong>${esc(wo.workOrderName)}</strong><br>${esc(wo.projectName)}<br>${wo.items.length} items`,
-        deleteWorkOrder, id
-    );
+    showConfirmationDialog(t.deleteWorkOrder, `${t.areYouSureDeleteWorkOrder}<br><br><strong>${esc(wo.workOrderName)}</strong><br>${esc(wo.projectName)}<br>${wo.items.length} items`, deleteWorkOrder, id);
 }
 
 function showDeleteModelConfirmation(id) {
@@ -4891,11 +4063,7 @@ function showDeleteModelConfirmation(id) {
     const t = translations[currentLanguage];
     const m = db.find(m => m.id === id);
     if (!m) return;
-    showConfirmationDialog(
-        t.deleteModel,
-        `${t.areYouSureDeleteModel}<br><br><strong>${esc(m.model)}</strong><br>${esc(m.type)}<br>${m.items.length} items`,
-        deleteModel, id
-    );
+    showConfirmationDialog(t.deleteModel, `${t.areYouSureDeleteModel}<br><br><strong>${esc(m.model)}</strong><br>${esc(m.type)}<br>${m.items.length} items`, deleteModel, id);
 }
 
 function showDeleteDowntimeConfirmation(id) {
@@ -4903,11 +4071,8 @@ function showDeleteDowntimeConfirmation(id) {
     const t = translations[currentLanguage];
     const rec = downtimeDB.find(r => r.id === id);
     if (!rec) return;
-    showConfirmationDialog(
-        t.deleteRecord,
-        `${t.areYouSureDeleteDowntime}<br><br><strong>${esc(rec.machine)}</strong><br>${esc(rec.downtimeType)} - ${rec.durationMinutes} min<br>${rec.date} - ${rec.shift || 'N/A'}`,
-        deleteDowntimeRecord, id
-    );
+    const workerInfo = (rec.downtimeType === 'Worker' && rec.workerName) ? `<br>Worker: ${esc(rec.workerName)}` : '';
+    showConfirmationDialog(t.deleteRecord, `${t.areYouSureDeleteDowntime}<br><br><strong>${esc(rec.machine)}</strong><br>${esc(rec.downtimeType)} - ${rec.durationMinutes} min${workerInfo}<br>${rec.date} - ${rec.shift || 'N/A'}`, deleteDowntimeRecord, id);
 }
 
 function showDeleteNCRConfirmation(id) {
@@ -4915,14 +4080,9 @@ function showDeleteNCRConfirmation(id) {
     const t = translations[currentLanguage];
     const rec = ncrDB.find(r => r.id === id);
     if (!rec) return;
-    showConfirmationDialog(
-        t.deleteRecord,
-        `${t.areYouSureDeleteNCR}<br><br><strong>${rec.itemName}</strong><br>${rec.ncrType} - ${rec.rejectedQty} pcs<br>${rec.date} - ${rec.shift}`,
-        deleteNCRRecord, id
-    );
+    showConfirmationDialog(t.deleteRecord, `${t.areYouSureDeleteNCR}<br><br><strong>${rec.itemName}</strong><br>${rec.ncrType} - ${rec.rejectedQty} pcs<br>${rec.date} - ${rec.shift}`, deleteNCRRecord, id);
 }
 
-// ====== Delete Functions ======
 async function deleteProductionRecord(id) {
     if (!hasPermission('canDeleteProduction')) { showToast('غير مسموح لك بحذف سجلات الإنتاج', 'error'); return; }
     const t = translations[currentLanguage];
@@ -4937,20 +4097,14 @@ async function deleteProductionRecord(id) {
             const it = wo.items[itIdx];
             if (it.completedOperations && it.completedOperations[rec.operation]) {
                 it.completedOperations[rec.operation].completedQuantity -= rec.quantity;
-                if (it.completedOperations[rec.operation].completedQuantity < 0) {
-                    it.completedOperations[rec.operation].completedQuantity = 0;
-                }
-                it.completedOperations[rec.operation].completed =
-                    it.completedOperations[rec.operation].completedQuantity >= it.quantity;
-
-                // ✅ إعادة حساب completedQuantity بالطريقة الصحيحة (min) + تحديث الحالة
+                if (it.completedOperations[rec.operation].completedQuantity < 0) it.completedOperations[rec.operation].completedQuantity = 0;
+                it.completedOperations[rec.operation].completed = it.completedOperations[rec.operation].completedQuantity >= it.quantity;
                 it.completedQuantity = recalcItemCompletedQuantity(it);
                 recalcItemStatus(it);
-
                 workOrdersDB[woIdx] = wo;
                 const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
                 if (!woSaveResult || !woSaveResult.success) {
-                    showToast('تعذّر تحديث أمر الشغل على الخادم، لم يتم حذف سجل الإنتاج. تحقق من الاتصال وأعد المحاولة', 'error');
+                    showToast('تعذّر تحديث أمر الشغل على الخادم.', 'error');
                     return;
                 }
             }
@@ -4958,8 +4112,7 @@ async function deleteProductionRecord(id) {
     }
     productionDB.splice(idx, 1);
     await deleteProductionRecordOnServer(rec.id);
-    updateStats();
-    renderProductionList(); renderWorkOrdersList(); renderDashboard();
+    updateStats(); renderProductionList(); renderWorkOrdersList(); renderDashboard();
     await updateIdealRatesFromActual();
     showToast(t.productionDeleted, 'success');
 }
@@ -5015,7 +4168,6 @@ async function deleteNCRRecord(id) {
     showToast(t.ncrDeleted, 'success');
 }
 
-// ====== Update Stats ======
 function updateStats() {
     document.getElementById('totalModels').textContent = db.length;
     let totalItems = 0; db.forEach(m => totalItems += m.items.length);
@@ -5044,24 +4196,15 @@ function setupScrollToTop() {
     });
 }
 
-function scrollToTop() {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-}
+function scrollToTop() { window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
 function setWorkOrderFilter(filter) {
     currentWorkOrderFilter = filter;
     const inProgressBtn = document.getElementById('filterInProgressBtn');
     const finishedBtn = document.getElementById('filterFinishedBtn');
-    [inProgressBtn, finishedBtn].forEach(btn => {
-        if (btn) { btn.classList.remove('btn-primary'); btn.classList.add('btn-outline'); }
-    });
-    if (filter === 'inprogress') {
-        inProgressBtn.classList.remove('btn-outline');
-        inProgressBtn.classList.add('btn-primary');
-    } else if (filter === 'finished') {
-        finishedBtn.classList.remove('btn-outline');
-        finishedBtn.classList.add('btn-primary');
-    }
+    [inProgressBtn, finishedBtn].forEach(btn => { if (btn) { btn.classList.remove('btn-primary'); btn.classList.add('btn-outline'); } });
+    if (filter === 'inprogress') { inProgressBtn.classList.remove('btn-outline'); inProgressBtn.classList.add('btn-primary'); }
+    else if (filter === 'finished') { finishedBtn.classList.remove('btn-outline'); finishedBtn.classList.add('btn-primary'); }
     renderWorkOrdersList();
 }
 

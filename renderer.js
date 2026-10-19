@@ -1,9 +1,14 @@
-// renderer.js - Tower Manufacturing Management System v2.2.11
+// renderer.js - Tower Manufacturing Management System v2.3.0
 // ============================================================================
-// ✅ v2.2.11: إضافة قائمة نوع العطل (ماكينة/خامة/عامل/لوحة) + حقل اسم العامل
-// ✅ v2.2.11: إضافة حقول بحث في NCR لقوائم Work Order و Item
-// ✅ v2.2.10: إلغاء مرحلة Galvanizing + جعل Finish آخر عملية في كل بند
-// ✅ v2.2.9: إصلاح completedQuantity ليكون الحد الأدنى بين العمليات (bottleneck)
+// ✅ v2.3.0: إعادة تصميم Sales Order Family Tree — جدول شجري قابل للطيّ + مؤشرات علوية + تنبيه التأخير (Delayed/Critical)
+//           + بحث وفرز + عرضان فقط (Detailed / Summary) + تصدير Excel/PDF/طباعة سليم
+// ✅ v2.2.14: إضافة Chart View لـ Sales Order Family Tree (3 أوضاع عرض)
+// ✅ v2.2.13: Sales Order Family Tree (Table View + Cards View)
+// ✅ v2.2.12: سبب NCR (عامل/ماكينة/الرسم الهندسي/خامة) + اسم العامل
+// ✅ v2.2.12: قائمة نوع العطل في Downtime (ماكينة/خامة/عامل/لوحة) + اسم العامل
+// ✅ v2.2.11: حقول بحث في NCR لقوائم Work Order و Item
+// ✅ v2.2.10: إلغاء Galvanizing + جعل Finish آخر عملية
+// ✅ v2.2.9:  completedQuantity = الحد الأدنى بين العمليات (bottleneck)
 // ============================================================================
 
 // ============= GLOBAL VARIABLES =============
@@ -39,7 +44,7 @@ const STATUS = {
 };
 
 let appConfig = {
-    version: '2.2.11',
+    version: '2.2.14',
     settings: {},
     lastBackup: null,
     backupSchedule: 'none'
@@ -401,10 +406,7 @@ function renderAll() {
 function handleLogin() {
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value.trim();
-    if (!username || !password) {
-        showToast('الرجاء إدخال اسم المستخدم وكلمة المرور', 'warning');
-        return;
-    }
+    if (!username || !password) { showToast('الرجاء إدخال اسم المستخدم وكلمة المرور', 'warning'); return; }
     const success = login(username, password);
     if (success) {
         if (!dataReady) { loadData().then(() => renderAll()); }
@@ -425,18 +427,13 @@ function getYesterdayDateStr() {
 }
 
 async function saveToServer(dataType, data) {
-    if (!dataReady) {
-        showToast('⛔ الحفظ معطّل: لم يتم تحميل البيانات من الخادم بعد.', 'error');
-        return { success: false, error: 'data not loaded' };
-    }
+    if (!dataReady) { showToast('⛔ الحفظ معطّل: لم يتم تحميل البيانات من الخادم بعد.', 'error'); return { success: false, error: 'data not loaded' }; }
     lastSavePayload[dataType] = JSON.stringify(data);
     unconfirmedTypes.add(dataType);
     pendingSaves++;
     try {
         const response = await fetch(`${SERVER_URL}/api/data/${dataType}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: lastSavePayload[dataType]
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: lastSavePayload[dataType]
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
@@ -507,14 +504,12 @@ async function loadProductionRecords() {
 }
 
 async function flushNewProductionRecords() {
-    if (!dataReady) { showToast('⛔ الحفظ معطّل: لم يتم تحميل البيانات من الخادم بعد.', 'error'); return { success: false, error: 'data not loaded' }; }
+    if (!dataReady) { showToast('⛔ الحفظ معطّل.', 'error'); return { success: false, error: 'data not loaded' }; }
     const pending = productionDB.filter(r => !syncedRecordIds.has(r.id));
     if (pending.length === 0) return { success: true, inserted: 0 };
     try {
         const response = await fetch(`${SERVER_URL}/api/production`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(pending)
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pending)
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
@@ -547,9 +542,7 @@ async function replaceAllProductionRecordsOnServer() {
     if (!dataReady) return { success: false, error: 'data not loaded' };
     try {
         const response = await fetch(`${SERVER_URL}/api/production/replace-all`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(productionDB)
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(productionDB)
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
@@ -598,24 +591,17 @@ async function createProductionRecordsForArchivedOrders() {
 }
 
 async function convertArchivedToFinished() {
-    if (!hasPermission('canMarkAsFinished')) {
-        showToast('❌ غير مسموح لك بنقل الأوامر المؤرشفة. هذه الصلاحية للمدير فقط.', 'error');
-        return;
-    }
+    if (!hasPermission('canMarkAsFinished')) { showToast('❌ غير مسموح لك بنقل الأوامر المؤرشفة.', 'error'); return; }
     let count = 0;
     workOrdersDB.forEach(wo => { if (wo.archived === true) count++; });
     if (count === 0) { showToast('لا توجد أوامر عمل في الأرشيف', 'info'); return; }
-    if (confirm(`هل أنت متأكد من نقل ${count} أمر عمل من Archived إلى Finished Work Orders؟\nسيتم أيضاً إنشاء سجلات إنتاج للأوامر لعرض الوزن في Dashboard.`)) {
+    if (confirm(`هل أنت متأكد من نقل ${count} أمر عمل من Archived إلى Finished Work Orders؟`)) {
         await saveToServer('workOrdersDB', workOrdersDB);
         await createProductionRecordsForArchivedOrders();
-        renderWorkOrdersList();
-        renderDashboard();
-        populateProductionTowerTypeDropdown();
-        populateDailyReportWorkOrders();
-        populateNCRWorkOrders();
-        populateReportDropdowns();
-        populateShortageWorkOrders();
-        populateWorkOrdersForOperation();
+        renderWorkOrdersList(); renderDashboard();
+        populateProductionTowerTypeDropdown(); populateDailyReportWorkOrders();
+        populateNCRWorkOrders(); populateReportDropdowns();
+        populateShortageWorkOrders(); populateWorkOrdersForOperation();
     }
 }
 
@@ -627,8 +613,7 @@ function repairLegacyCompletedQuantities() {
             const before = item.completedQuantity || 0;
             const after = recalcItemCompletedQuantity(item);
             if (before !== after) { item.completedQuantity = after; repairedCount++; }
-            let allComplete = true;
-            let anyCompleted = false;
+            let allComplete = true, anyCompleted = false;
             item.operations.forEach(op => {
                 const comp = item.completedOperations ? item.completedOperations[op.name] : null;
                 const qty = comp ? (parseInt(comp.completedQuantity) || 0) : 0;
@@ -686,7 +671,6 @@ async function loadData() {
         let archivedCount = 0;
         workOrdersDB.forEach(wo => { if (wo.archived === true) archivedCount++; });
         if (archivedCount > 0) {
-            console.log(`🔄 جاري نقل ${archivedCount} أمر عمل من Archived إلى Finished...`);
             await saveToServer('workOrdersDB', workOrdersDB);
             await createProductionRecordsForArchivedOrders();
         }
@@ -694,9 +678,7 @@ async function loadData() {
         const operatorsData = await loadFromServer('machineOperatorsDB');
         machineOperatorsDB = operatorsData || {};
         const preferencesData = await loadFromServer('productionPreferences');
-        productionPreferences = preferencesData || {
-            towerType: '', model: '', workOrderId: '', shift: '', machine: '', operator: '', date: new Date().toISOString().split('T')[0]
-        };
+        productionPreferences = preferencesData || { towerType: '', model: '', workOrderId: '', shift: '', machine: '', operator: '', date: new Date().toISOString().split('T')[0] };
         downtimeDB = await loadFromServer('downtimeDB');
         machineIdealRates = await loadFromServer('machineIdealRates');
         ncrDB = await loadFromServer('ncrDB');
@@ -706,10 +688,7 @@ async function loadData() {
     } catch (error) {
         console.error('Error loading data:', error);
         dataReady = false;
-        alert('⚠ تعذّر تحميل البيانات من الخادم.\n\n' +
-            'تم تعطيل الحفظ مؤقتًا لحماية بياناتك من الفقدان.\n' +
-            'تأكد من تشغيل الخادم (' + SERVER_URL + ') ثم أعد فتح البرنامج.\n\n' +
-            'لا تُدخل أي بيانات الآن.');
+        alert('⚠ تعذّر تحميل البيانات من الخادم.\n\nتأكد من تشغيل الخادم (' + SERVER_URL + ') ثم أعد فتح البرنامج.');
         showToast('تعذّر الاتصال بالخادم — الحفظ معطّل لحماية البيانات', 'error');
     }
 }
@@ -747,29 +726,7 @@ function showSettingsPanel() {
 function renderUsersManagement() {
     const container = document.getElementById('usersManagementContainer');
     if (!container) return;
-    let html = `
-        <div class="card p-4 mt-4 border-t-2 border-indigo-200">
-            <h3 class="text-lg font-bold mb-4"><i class="fa-solid fa-users-gear mr-2 text-indigo-600"></i> إدارة المستخدمين</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div class="input-group"><label class="input-label">اسم المستخدم</label><input type="text" id="newUsername" class="input-field" placeholder="أدخل اسم المستخدم"></div>
-                <div class="input-group"><label class="input-label">كلمة المرور</label><input type="password" id="newPassword" class="input-field" placeholder="أدخل كلمة المرور"></div>
-                <div class="input-group"><label class="input-label">الدور</label>
-                    <select id="newUserRole" class="input-field">
-                        <option value="administrator">مدير النظام</option>
-                        <option value="planning">التخطيط</option>
-                        <option value="production">الإنتاج</option>
-                        <option value="qc">الجودة</option>
-                        <option value="projects">المشروعات</option>
-                        <option value="top_management">الإدارة العليا</option>
-                    </select>
-                </div>
-                <div class="flex items-end"><button onclick="addUser()" class="btn btn-primary w-full"><i class="fa-solid fa-user-plus"></i> إضافة مستخدم</button></div>
-            </div>
-            <div class="table-container">
-                <table class="table report-table"><thead><tr><th>#</th><th>اسم المستخدم</th><th>الدور</th><th>إجراءات</th></tr></thead><tbody id="usersTableBody"></tbody></table>
-            </div>
-        </div>
-    `;
+    let html = `<div class="card p-4 mt-4 border-t-2 border-indigo-200"><h3 class="text-lg font-bold mb-4"><i class="fa-solid fa-users-gear mr-2 text-indigo-600"></i> إدارة المستخدمين</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">اسم المستخدم</label><input type="text" id="newUsername" class="input-field" placeholder="أدخل اسم المستخدم"></div><div class="input-group"><label class="input-label">كلمة المرور</label><input type="password" id="newPassword" class="input-field" placeholder="أدخل كلمة المرور"></div><div class="input-group"><label class="input-label">الدور</label><select id="newUserRole" class="input-field"><option value="administrator">مدير النظام</option><option value="planning">التخطيط</option><option value="production">الإنتاج</option><option value="qc">الجودة</option><option value="projects">المشروعات</option><option value="top_management">الإدارة العليا</option></select></div><div class="flex items-end"><button onclick="addUser()" class="btn btn-primary w-full"><i class="fa-solid fa-user-plus"></i> إضافة مستخدم</button></div></div><div class="table-container"><table class="table report-table"><thead><tr><th>#</th><th>اسم المستخدم</th><th>الدور</th><th>إجراءات</th></tr></thead><tbody id="usersTableBody"></tbody></table></div></div>`;
     container.innerHTML = html;
     renderUsersTable();
 }
@@ -780,10 +737,7 @@ function renderUsersTable() {
     if (usersDB.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4">لا يوجد مستخدمين</td></tr>'; return; }
     let rows = '';
     usersDB.forEach((user, index) => {
-        const roleNames = {
-            administrator: 'مدير النظام', planning: 'التخطيط', production: 'الإنتاج',
-            qc: 'الجودة', projects: 'المشروعات', top_management: 'الإدارة العليا'
-        };
+        const roleNames = { administrator: 'مدير النظام', planning: 'التخطيط', production: 'الإنتاج', qc: 'الجودة', projects: 'المشروعات', top_management: 'الإدارة العليا' };
         rows += `<tr><td class="text-center">${index + 1}</td><td class="font-bold">${esc(user.username)}</td><td class="text-center"><span class="badge badge-info">${roleNames[user.role] || user.role}</span></td><td class="text-center"><button onclick="editUser('${esc(user.username)}')" class="btn btn-sm btn-outline"><i class="fa-solid fa-edit"></i></button> <button onclick="deleteUser('${esc(user.username)}')" class="btn btn-sm btn-danger"><i class="fa-solid fa-trash"></i></button></td></tr>`;
     });
     tbody.innerHTML = rows;
@@ -817,7 +771,7 @@ async function deleteUser(username) {
 async function editUser(username) {
     const user = findUser(username);
     if (!user) return;
-    const newPassword = prompt(`تعديل كلمة المرور للمستخدم "${username}" (اترك فارغاً لإبقائها دون تغيير):`, '');
+    const newPassword = prompt(`تعديل كلمة المرور للمستخدم "${username}":`, '');
     if (newPassword === null) return;
     if (newPassword.trim() !== '') {
         user.password = newPassword.trim();
@@ -830,12 +784,10 @@ async function editUser(username) {
 // ============= TRANSLATIONS =============
 const translations = {
     en: {
-        appTitle: "Tower Manufacturing Management System ",
-        appSubtitle: "66KV - 220KV - 500KV - Telecom ",
-        manageOperators: "Manage Operators ", backup: "Backup ", database: "Database ",
-        workOrders: "Work Orders ", dailyProduction: "Daily Production ", reports: "Reports ",
-        settings: "Settings ", downtime: "Downtime ", dashboard: "Dashboard ",
-        dashboardTitle: "Production Dashboard ", lastUpdated: "Last updated ",
+        appTitle: "Tower Manufacturing Management System ", appSubtitle: "66KV - 220KV - 500KV - Telecom ",
+        manageOperators: "Manage Operators ", backup: "Backup ", database: "Database ", workOrders: "Work Orders ",
+        dailyProduction: "Daily Production ", reports: "Reports ", settings: "Settings ", downtime: "Downtime ",
+        dashboard: "Dashboard ", dashboardTitle: "Production Dashboard ", lastUpdated: "Last updated ",
         activeWorkOrders: "Active Work Orders ", totalDowntimeToday: "Downtime (Yesterday) ",
         productionToday: "Production (Yesterday) ", finishedWorkOrders: "Finished WOs ",
         minimumProgress: "Minimum Operations Progress ", finishingProgress: "Finishing Operations Progress ",
@@ -844,85 +796,66 @@ const translations = {
         finishingDesc: "Includes operations: Finishing ",
         downtimeByType: "Downtime by Type ", totalDowntime: "Total Downtime ",
         recentDowntime: "Recent Downtime ", noData: "No data available ",
-        modelsDatabase: "Models Database ", towerType: "Tower Type ",
-        selectType: "Select type... ", modelName: "Model Name ",
-        uploadExcelFile: "Upload Excel File ", clickToUpload: "Click to upload or drag & drop ",
+        modelsDatabase: "Models Database ", towerType: "Tower Type ", selectType: "Select type... ",
+        modelName: "Model Name ", uploadExcelFile: "Upload Excel File ", clickToUpload: "Click to upload or drag & drop ",
         fileMustContain: "File must contain required columns ", processSaveData: "Process & Save Data ",
         importantInformation: "Important Information ", excelMustContain: "Excel file must contain these columns ",
         itemNameSection: "Item Name, Section, Steel Grade ", operations5to7: "Operations (5 to 7 operations) ",
         operationsProcessed: "Operations processed automatically ", statistics: "Statistics ",
-        models: "Models ", items: "Items ", savedModels: "Saved Models ",
-        searchModel: "Search model... ", noSavedModels: "No saved models. Upload your first Excel file. ",
-        modelDetails: "Model Details ", close: "Close ",
+        models: "Models ", items: "Items ", savedModels: "Saved Models ", searchModel: "Search model... ",
+        noSavedModels: "No saved models. ", modelDetails: "Model Details ", close: "Close ",
         createNewWorkOrder: "Create New Work Order ", workOrderName: "Work Order Name ",
-        projectName: "Project Name ", salesOrderNumber: "Sales Order Number ",
-        workOrderTowerType: "Tower Type ", uploadWorkOrderFile: "Upload Work Order File ",
-        createWorkOrder: "Create Work Order ", notes: "Notes ",
-        selectExistingModel: "Select existing model from database ",
+        projectName: "Project Name ", salesOrderNumber: "Sales Order Number ", uploadWorkOrderFile: "Upload Work Order File ",
+        createWorkOrder: "Create Work Order ", notes: "Notes ", selectExistingModel: "Select existing model from database ",
         operationsImported: "Operations will be imported from selected model ",
         woFileMustContain: "Work order file must contain quantities & weights ",
-        productionStatusUpdated: "Production status updated automatically ",
-        workOrdersStatistics: "Work Orders Statistics ", searchWorkOrders: "Search work orders... ",
-        noWorkOrders: "No work orders. Create your first work order. ",
+        productionStatusUpdated: "Production status updated automatically ", workOrdersStatistics: "Work Orders Statistics ",
+        searchWorkOrders: "Search work orders... ", noWorkOrders: "No work orders. ",
         exportExcel: "Excel ", generateReport: "Report ", workOrderDetails: "Work Order Details ",
-        save: "Save ", clear: "Clear ",
-        selectionsSaved: "Your selections will be saved automatically for easier entry of subsequent items ",
-        shift: "Shift ", selectShift: "Select shift... ", firstShift: "First Shift ",
-        secondShift: "Second Shift ", thirdShift: "Third Shift ",
-        machineName: "Machine Name ", selectMachine: "Select machine... ",
-        operatorName: "Operator Name ", selectOperator: "Select operator... ",
-        selectItemProduction: "Select Item for Production ", selectItem: "Select item... ",
-        section: "Section ", operation: "Operation ", totalQty: "Total Qty ",
-        completed: "Completed ", remaining: "Remaining ", weightPiece: "Weight/Piece ",
-        quantityProduced: "Quantity Produced ", notesField: "Additional notes... ",
+        save: "Save ", clear: "Clear ", selectionsSaved: "Your selections will be saved automatically ",
+        shift: "Shift ", selectShift: "Select shift... ", firstShift: "First Shift ", secondShift: "Second Shift ", thirdShift: "Third Shift ",
+        machineName: "Machine Name ", selectMachine: "Select machine... ", operatorName: "Operator Name ", selectOperator: "Select operator... ",
+        selectItemProduction: "Select Item for Production ", selectItem: "Select item... ", section: "Section ",
+        operation: "Operation ", totalQty: "Total Qty ", completed: "Completed ", remaining: "Remaining ",
+        weightPiece: "Weight/Piece ", quantityProduced: "Quantity Produced ", notesField: "Additional notes... ",
         recordProduction: "Record Production ", productionStatistics: "Production Statistics ",
         productionRecords: "Production Records ", piecesProduced: "Pieces Produced ",
-        searchProduction: "Search production records... ",
-        noProductionRecords: "No production records. Record daily production. ",
-        showingLatestRecords: "Showing latest 10 production records. ",
-        productionRecordDetails: "Production Record Details ", searchItem: "Search item (e.g. A1)... ",
-        itemsStatusReport: "Items Status Report ",
-        detailedStatus: "Get detailed status of items in a specific work order ",
-        selectWorkOrder: "Select Work Order ", generateItemsStatus: "Generate Items Status Report ",
-        detailedItemReport: "Detailed Item Report ",
-        detailedProduction: "Get detailed production record for a specific item ",
-        generateDetailed: "Generate Detailed Report ", dailyProductionReport: "Daily Production Report ",
-        fromDate: "From Date ", toDate: "To Date ", allShifts: "All Shifts ",
+        searchProduction: "Search production records... ", noProductionRecords: "No production records. ",
+        showingLatestRecords: "Showing latest 10 production records. ", productionRecordDetails: "Production Record Details ",
+        searchItem: "Search item... ", itemsStatusReport: "Items Status Report ",
+        detailedStatus: "Get detailed status of items ", selectWorkOrder: "Select Work Order ",
+        generateItemsStatus: "Generate Items Status Report ", detailedItemReport: "Detailed Item Report ",
+        detailedProduction: "Production history for a specific item ", generateDetailed: "Generate Detailed Report ",
+        dailyProductionReport: "Daily Production Report ", fromDate: "From Date ", toDate: "To Date ", allShifts: "All Shifts ",
         operationPhase: "Operation Phase ", allPhases: "All Phases ", allMachines: "All Machines ",
         generateDaily: "Generate Daily Production Report ", operationStatusReport: "Operation Status Report ",
-        operationStatusDesc: "Get the status of a specific operation in work orders ",
-        selectOperationPhase: "Select Operation Phase ", selectOperation: "Select operation... ",
-        generateOperationStatus: "Generate Operation Status Report ",
+        operationStatusDesc: "Status of a specific operation ", selectOperationPhase: "Select Operation Phase ",
+        selectOperation: "Select operation... ", generateOperationStatus: "Generate Operation Status Report ",
         machineCategory: "Machine Category ", angles: "Angles ", plates: "Plates ", all: "All ",
         print: "Print ", exportPdf: "PDF ", stageSummaryReport: "Project Stage Summary ",
-        stageSummaryDesc: "Completed vs in-progress per manufacturing stage, with totals ",
-        selectProject: "Select Project ", allProjects: "All Projects ", stage: "Stage ",
-        generateStageSummary: "Generate Stage Summary ", selectSalesOrder: "Select Sales Order ",
-        allSalesOrders: "All Sales Orders ", minStoppageReport: "WIP After Minimum",
-        minStoppageDesc: "Items that completed Minimum and are still WIP in later stages",
-        stoppedAtStage: "Stopped At Stage ",
-        welcome: "Welcome to Tower Manufacturing Management System! ",
+        stageSummaryDesc: "Completed vs in-progress per stage ", selectProject: "Select Project ",
+        allProjects: "All Projects ", stage: "Stage ", generateStageSummary: "Generate Stage Summary ",
+        selectSalesOrder: "Select Sales Order ", allSalesOrders: "All Sales Orders ",
+        minStoppageReport: "WIP After Minimum", minStoppageDesc: "Items that completed Minimum and are still WIP ",
+        stoppedAtStage: "Stopped At Stage ", welcome: "Welcome to Tower Manufacturing Management System! ",
         backupCreated: "Backup created successfully ", dataRestored: "Data restored successfully ",
         operatorsSaved: "Operators saved successfully ", preferencesSaved: "Preferences saved ",
         fileLoaded: "File loaded successfully ", woFileLoaded: "Work order file loaded ",
         modelSaved: "Model data saved successfully ", woProcessed: "Work order processed successfully ",
         productionRecorded: "Production recorded successfully ", fieldsCleared: "Fields cleared ",
         selectWOOp: "Please select work order and operation ", selectWO: "Please select work order ",
-        selectWODate: "Please select date range ", inProgress: "In Progress ",
-        completedStatus: "Completed ", pending: "Pending ", cropping: "Cropping ",
-        manualPlasma: "Manual Plasma ", press: "Press ", drill: "Drill ",
-        chamfering: "Chamfering ", shear: "Shear ", cncBending: "CNC Bending ",
-        finishing: "Finishing ", length: "Length ", quantity: "Quantity ",
-        totalWeight: "Total Weight ", weightProduced: "Weight Produced ",
-        creationDate: "Creation Date ", salesOrder: "Sales Order ", project: "Project ",
-        machine: "Machine ", operator: "Operator ",
+        selectWODate: "Please select date range ", inProgress: "In Progress ", completedStatus: "Completed ",
+        pending: "Pending ", cropping: "Cropping ", manualPlasma: "Manual Plasma ", press: "Press ",
+        drill: "Drill ", chamfering: "Chamfering ", shear: "Shear ", cncBending: "CNC Bending ",
+        finishing: "Finishing ", length: "Length ", quantity: "Quantity ", totalWeight: "Total Weight ",
+        weightProduced: "Weight Produced ", creationDate: "Creation Date ", salesOrder: "Sales Order ",
+        project: "Project ", machine: "Machine ", operator: "Operator ",
         allWorkOrders: "All Work Orders ", inProgressWorkOrders: "In Progress Work Orders ",
         finishedOrders: "Finished Orders ", processing: "Processing... ",
         backupSchedule: "Backup Schedule ", setAutomaticBackup: "Set automatic backup timing ",
         saveSchedule: "Save Schedule ", backupManagement: "Backup Management ",
-        delete: "Delete ", deleteRecord: "Delete Record ", deleteModel: "Delete Model ",
-        deleteWorkOrder: "Delete Work Order ", confirmDelete: "Confirm Delete ",
-        areYouSureDeleteModel: "Are you sure you want to delete this model? ",
+        delete: "Delete ", deleteRecord: "Delete Record ", deleteModel: "Delete Model ", deleteWorkOrder: "Delete Work Order ",
+        confirmDelete: "Confirm Delete ", areYouSureDeleteModel: "Are you sure you want to delete this model? ",
         areYouSureDeleteWorkOrder: "Are you sure you want to delete this work order? ",
         areYouSureDeleteProduction: "Are you sure you want to delete this production record? ",
         areYouSureDeleteDowntime: "Are you sure you want to delete this downtime record? ",
@@ -930,23 +863,19 @@ const translations = {
         workOrderHasProduction: "This work order has production records and cannot be deleted ",
         confirm: "Confirm ", cancel: "Cancel ", recordDeleted: "Record deleted successfully ",
         modelDeleted: "Model deleted successfully ", workOrderDeleted: "Work order deleted successfully ",
-        productionDeleted: "Production record deleted successfully ",
-        downtimeDeleted: "Downtime record deleted successfully ",
+        productionDeleted: "Production record deleted successfully ", downtimeDeleted: "Downtime record deleted successfully ",
         selectReportType: "Select Report Type ", backupRestore: "Backup Management ",
         createBackup: "Create Backup ", saveAllData: "Save all system data to a JSON file ",
         restoreBackup: "Restore Backup ", restoreData: "Restore data from a backup file ",
         downtimeRecording: "Downtime Recording ", downtimeType: "Fault Type ",
-        selectDowntimeType: "Select type... ",
-        workerName: "Worker Name ",
-        workerNamePlaceholder: "Enter worker name... ",
+        selectDowntimeType: "Select type... ", workerName: "Worker Name ", workerNamePlaceholder: "Enter worker name... ",
         maintenance: "Maintenance ", planningLoad: "Planning Load ", materialIssue: "Material Issue ",
-        laborShortage: "Labor Shortage ", quality: "Quality ",
-        description: "Description ", durationMinutes: "Duration (minutes) ",
-        recordDowntime: "Record Downtime ", downtimeInfo: "Downtime Information ",
+        laborShortage: "Labor Shortage ", quality: "Quality ", description: "Description ",
+        durationMinutes: "Duration (minutes) ", recordDowntime: "Record Downtime ", downtimeInfo: "Downtime Information ",
         downtimeHelp: "Record machine downtime for analysis ", downtimeHelp2: "Used for OEE calculations ",
         downtimeStats: "Downtime Statistics ", downtimeRecords: "Downtime Records ",
         searchDowntime: "Search downtime records... ", records: "Records ",
-        shortageReport: "Shortage Report ", shortageDesc: "Show items with remaining quantity > 0 ",
+        shortageReport: "Shortage Report ", shortageDesc: "Items with remaining quantity > 0 ",
         generateShortage: "Generate Shortage Report ", remainingQty: "Remaining Qty ",
         downtimeReport: "Downtime Report ", generateDowntimeReport: "Generate Downtime Report ",
         showingLatestDowntimeRecords: "Showing latest 10 downtime records. ",
@@ -956,35 +885,50 @@ const translations = {
         rejectedQty: "Rejected Quantity ", goodQty: "Good Quantity ", saveIdealRates: "Save Ideal Rates ",
         ncrTitle: "Non-Conformance ", ncrType: "NCR Type ", scrap: "Scrap ",
         acceptAsIs: "Accept as it is ", repair: "Repair ", ncrComment: "Comment ",
-        recordNCR: "Record NCR ", ncrRecords: "NCR Records ", searchNCR: "Search NCR records... ",
-        ncrDeleted: "NCR record deleted successfully ",
+        ncrCause: "NCR Cause ", recordNCR: "Record NCR ", ncrRecords: "NCR Records ",
+        searchNCR: "Search NCR records... ", ncrDeleted: "NCR record deleted successfully ",
         areYouSureDeleteNCR: "Are you sure you want to delete this NCR record? ",
         teepTitle: "Total Effective Equipment Performance (TEEP) ", teepValue: "TEEP ",
         ncrReport: "NCR Report ", oeeReport: "OEE Report ", teepReport: "TEEP Report ",
         utilization: "Utilization ", totalProduction: "Total Production ", totalRejected: "Total Rejected ",
         hrTitle: "Workforce Management (HR) ", employeeName: "Employee Name ",
-        employeeId: "Employee ID ", department: "Department ", position: "Position ",
-        phone: "Phone ", hireDate: "Hire Date ", status: "Status ",
-        saveEmployee: "Save Employee ", employeeList: "Employee List ",
+        employeeId: "Employee ID ", department: "Department ", position: "Position ", phone: "Phone ",
+        hireDate: "Hire Date ", status: "Status ", saveEmployee: "Save Employee ", employeeList: "Employee List ",
         totalEmployees: "Total Employees ", activeEmployees: "Active ", hrNotes: "HR Notes ",
         employeeDeleted: "Employee deleted successfully ",
         areYouSureDeleteEmployee: "Are you sure you want to delete this employee? ",
         balanceComplete: "Complete as Balance ", monthlyProductionReport: "Monthly Production Report ",
-        monthlyReportDesc: "Daily Minimum & Finish vs target (22 tons), with cumulative efficiency ",
+        monthlyReportDesc: "Daily Minimum & Finish vs target (22 tons) ",
         month: "Month ", day: "Day ", date: "Date ", target: "Target (tons) ",
         actualMin: "Min (tons) ", actualFin: "Finish (tons) ", effMin: "Min Eff % ",
         effFin: "Finish Eff % ", cumEffMin: "Cum. Min Eff % ", cumEffFin: "Cum. Finish Eff % ",
-        workingDay: "Working Day ", holiday: "Holiday ",
-        noData: "No production data for this month ", generateMonthlyReport: "Generate Monthly Report ",
+        workingDay: "Working Day ", holiday: "Holiday ", generateMonthlyReport: "Generate Monthly Report ",
         logout: "Logout", loginTitle: "Login", username: "Username", password: "Password",
-        role: "Role", loginButton: "Login",
-        loginHint: "For testing: use any username and choose the appropriate role",
+        role: "Role", loginButton: "Login", loginHint: "For testing: use any username and choose the appropriate role",
         usernamePlaceholder: "Enter username", passwordPlaceholder: "Enter password",
         rolePlanning: "Planning", roleProduction: "Production", roleQC: "Quality",
         roleProjects: "Projects", roleTopManagement: "Top Management", roleAdministrator: "Administrator",
         markAsFinished: "Mark as Finished",
         markAsFinishedConfirm: "Mark this work order as Finished? (≥90% complete)\nIncomplete items will remain and can be completed later.",
-        minCompletionRequired: "Minimum 90% completion required to mark as finished"
+        minCompletionRequired: "Minimum 90% completion required to mark as finished",
+        soFamilyTree: "Sales Order Family Tree",
+        soFamilyTreeDesc: "Hierarchical tree for each Sales Order with its Work Orders and status ",
+        treeSalesOrderFilter: "Sales Order",
+        treeStatusFilter: "Status",
+        treeViewStyle: "View Style",
+        treeDetailView: "🌳 Detailed Tree (collapsible)",
+        treeSummaryView: "📋 Summary (one row per Sales Order)",
+        treeDelayDays: "Delay Threshold (days)",
+        treeDelayBasis: "Delay Basis",
+        treeBasisAge: "Days since work order creation",
+        treeBasisIdle: "Days without production activity",
+        treeStatusAll: "All",
+        treeStatusInProgress: "In Progress Only",
+        treeStatusFinished: "Finished Only",
+        treeStatusDelayed: "Delayed Only",
+        generateFamilyTree: "Generate Family Tree",
+        noSalesOrdersMatch: "No Sales Orders match the current filter",
+        noWorkOrdersMatchFilter: "No work orders match the current filter"
     },
     ar: {
         appTitle: "نظام إدارة تصنيع الأبراج ", appSubtitle: "66KV - 220KV - 500KV - الاتصالات ",
@@ -1000,85 +944,68 @@ const translations = {
         finishingDesc: "يشمل عمليات: التشطيب ",
         downtimeByType: "التوقفات حسب النوع ", totalDowntime: "إجمالي التوقفات ",
         recentDowntime: "أحدث التوقفات ", noData: "لا توجد بيانات ",
-        modelsDatabase: "قاعدة بيانات النماذج ", towerType: "نوع البرج ",
-        selectType: "اختر النوع... ", modelName: "اسم النموذج ",
-        uploadExcelFile: "رفع ملف Excel ", clickToUpload: "انقر للرفع أو اسحب وأفلت ",
+        modelsDatabase: "قاعدة بيانات النماذج ", towerType: "نوع البرج ", selectType: "اختر النوع... ",
+        modelName: "اسم النموذج ", uploadExcelFile: "رفع ملف Excel ", clickToUpload: "انقر للرفع أو اسحب وأفلت ",
         fileMustContain: "يجب أن يحتوي الملف على الأعمدة المطلوبة ", processSaveData: "معالجة وحفظ البيانات ",
         importantInformation: "معلومات مهمة ", excelMustContain: "يجب أن يحتوي ملف Excel على هذه الأعمدة ",
         itemNameSection: "اسم البند، القطاع، درجة الصلب ", operations5to7: "العمليات (5 إلى 7 عمليات) ",
         operationsProcessed: "معالجة العمليات تلقائياً ", statistics: "إحصائيات ",
-        models: "نماذج ", items: "بنود ", savedModels: "النماذج المحفوظة ",
-        searchModel: "بحث في النماذج... ", noSavedModels: "لا توجد نماذج محفوظة. ارفع أول ملف Excel. ",
-        modelDetails: "تفاصيل النموذج ", close: "إغلاق ",
+        models: "نماذج ", items: "بنود ", savedModels: "النماذج المحفوظة ", searchModel: "بحث في النماذج... ",
+        noSavedModels: "لا توجد نماذج محفوظة. ", modelDetails: "تفاصيل النموذج ", close: "إغلاق ",
         createNewWorkOrder: "إنشاء أمر عمل جديد ", workOrderName: "اسم أمر العمل ",
-        projectName: "اسم المشروع ", salesOrderNumber: "رقم أمر المبيعات ",
-        workOrderTowerType: "نوع البرج ", uploadWorkOrderFile: "رفع ملف أمر العمل ",
-        createWorkOrder: "إنشاء أمر العمل ", notes: "ملاحظات ",
-        selectExistingModel: "اختر نموذجاً من قاعدة البيانات ",
+        projectName: "اسم المشروع ", salesOrderNumber: "رقم أمر المبيعات ", uploadWorkOrderFile: "رفع ملف أمر العمل ",
+        createWorkOrder: "إنشاء أمر العمل ", notes: "ملاحظات ", selectExistingModel: "اختر نموذجاً من قاعدة البيانات ",
         operationsImported: "سيتم استيراد العمليات من النموذج المحدد ",
         woFileMustContain: "يجب أن يحتوي ملف أمر العمل على الكميات والأوزان ",
-        productionStatusUpdated: "يتم تحديث حالة الإنتاج تلقائياً ",
-        workOrdersStatistics: "إحصائيات أوامر العمل ", searchWorkOrders: "بحث في أوامر العمل... ",
-        noWorkOrders: "لا توجد أوامر عمل. أنشئ أول أمر عمل. ",
+        productionStatusUpdated: "يتم تحديث حالة الإنتاج تلقائياً ", workOrdersStatistics: "إحصائيات أوامر العمل ",
+        searchWorkOrders: "بحث في أوامر العمل... ", noWorkOrders: "لا توجد أوامر عمل. ",
         exportExcel: "Excel ", generateReport: "تقرير ", workOrderDetails: "تفاصيل أمر العمل ",
-        save: "حفظ ", clear: "مسح ",
-        selectionsSaved: "سيتم حفظ اختياراتك تلقائياً لتسهيل إدخال البنود التالية ",
+        save: "حفظ ", clear: "مسح ", selectionsSaved: "سيتم حفظ اختياراتك تلقائياً ",
         shift: "الوردية ", selectShift: "اختر الوردية... ", firstShift: "الوردية الأولى ",
         secondShift: "الوردية الثانية ", thirdShift: "الوردية الثالثة ",
         machineName: "اسم الماكينة ", selectMachine: "اختر الماكينة... ",
         operatorName: "اسم العامل ", selectOperator: "اختر العامل... ",
-        selectItemProduction: "اختر البند للإنتاج ", selectItem: "اختر البند... ",
-        section: "القطاع ", operation: "العملية ", totalQty: "الكمية الكلية ",
-        completed: "المكتمل ", remaining: "المتبقي ", weightPiece: "الوزن/قطعة ",
-        quantityProduced: "الكمية المنتجة ", notesField: "ملاحظات إضافية... ",
+        selectItemProduction: "اختر البند للإنتاج ", selectItem: "اختر البند... ", section: "القطاع ",
+        operation: "العملية ", totalQty: "الكمية الكلية ", completed: "المكتمل ", remaining: "المتبقي ",
+        weightPiece: "الوزن/قطعة ", quantityProduced: "الكمية المنتجة ", notesField: "ملاحظات إضافية... ",
         recordProduction: "تسجيل الإنتاج ", productionStatistics: "إحصائيات الإنتاج ",
         productionRecords: "سجلات الإنتاج ", piecesProduced: "القطع المنتجة ",
-        searchProduction: "بحث في سجلات الإنتاج... ",
-        noProductionRecords: "لم يتم العثور على سجلات إنتاج. ",
-        showingLatestRecords: "عرض آخر 10 سجلات إنتاج. ",
-        productionRecordDetails: "تفاصيل سجل الإنتاج ", searchItem: "ابحث عن البند (مثال: A1)... ",
-        itemsStatusReport: "تقرير حالة البنود ",
-        detailedStatus: "الحصول على حالة مفصلة للبنود في أمر عمل محدد ",
-        selectWorkOrder: "اختر أمر العمل ", generateItemsStatus: "إنشاء تقرير حالة البنود ",
-        detailedItemReport: "تقرير مفصل للبند ",
-        detailedProduction: "الحصول على سجل إنتاج مفصل لبند محدد ",
-        generateDetailed: "إنشاء تقرير مفصل ", dailyProductionReport: "تقرير الإنتاج اليومي ",
-        fromDate: "من تاريخ ", toDate: "إلى تاريخ ", allShifts: "جميع الورديات ",
+        searchProduction: "بحث في سجلات الإنتاج... ", noProductionRecords: "لم يتم العثور على سجلات إنتاج. ",
+        showingLatestRecords: "عرض آخر 10 سجلات إنتاج. ", productionRecordDetails: "تفاصيل سجل الإنتاج ",
+        searchItem: "ابحث عن البند... ", itemsStatusReport: "تقرير حالة البنود ",
+        detailedStatus: "الحصول على حالة مفصلة للبنود ", selectWorkOrder: "اختر أمر العمل ",
+        generateItemsStatus: "إنشاء تقرير حالة البنود ", detailedItemReport: "تقرير مفصل للبند ",
+        detailedProduction: "الحصول على سجل إنتاج مفصل لبند محدد ", generateDetailed: "إنشاء تقرير مفصل ",
+        dailyProductionReport: "تقرير الإنتاج اليومي ", fromDate: "من تاريخ ", toDate: "إلى تاريخ ", allShifts: "جميع الورديات ",
         operationPhase: "مرحلة العملية ", allPhases: "جميع المراحل ", allMachines: "جميع الماكينات ",
         generateDaily: "إنشاء تقرير الإنتاج اليومي ", operationStatusReport: "تقرير حالة العملية ",
-        operationStatusDesc: "الحصول على حالة عملية محددة في أوامر العمل ",
-        selectOperationPhase: "اختر مرحلة العملية ", selectOperation: "اختر العملية... ",
-        generateOperationStatus: "إنشاء تقرير حالة العملية ",
+        operationStatusDesc: "الحصول على حالة عملية محددة ", selectOperationPhase: "اختر مرحلة العملية ",
+        selectOperation: "اختر العملية... ", generateOperationStatus: "إنشاء تقرير حالة العملية ",
         machineCategory: "فئة الماكينة ", angles: "زوايا ", plates: "صاج ", all: "الكل ",
         print: "طباعة ", exportPdf: "PDF ", stageSummaryReport: "ملخص مراحل المشروع ",
-        stageSummaryDesc: "المكتمل مقابل ما تحت التشغيل لكل مرحلة تصنيع مع الإجمالي ",
-        selectProject: "اختر المشروع ", allProjects: "جميع المشاريع ", stage: "المرحلة ",
-        generateStageSummary: "إنشاء ملخص المراحل ", selectSalesOrder: "اختر أمر المبيعات ",
-        allSalesOrders: "جميع أوامر المبيعات ", minStoppageReport: "جاري العمل بعد المينمم ",
-        minStoppageDesc: "بنود أنهت مرحلة المينمم ولم تكتمل في المراحل التالية ",
-        stoppedAtStage: "المرحلة المتوقف عندها ",
-        welcome: "مرحباً بكم في نظام إدارة تصنيع الأبراج! ",
+        stageSummaryDesc: "المكتمل مقابل ما تحت التشغيل ", selectProject: "اختر المشروع ",
+        allProjects: "جميع المشاريع ", stage: "المرحلة ", generateStageSummary: "إنشاء ملخص المراحل ",
+        selectSalesOrder: "اختر أمر المبيعات ", allSalesOrders: "جميع أوامر المبيعات ",
+        minStoppageReport: "جاري العمل بعد المينمم ", minStoppageDesc: "بنود أنهت مرحلة المينمم ولم تكتمل في المراحل التالية ",
+        stoppedAtStage: "المرحلة المتوقف عندها ", welcome: "مرحباً بكم في نظام إدارة تصنيع الأبراج! ",
         backupCreated: "تم إنشاء النسخ الاحتياطي بنجاح ", dataRestored: "تم استعادة البيانات بنجاح ",
         operatorsSaved: "تم حفظ العاملين بنجاح ", preferencesSaved: "تم حفظ التفضيلات ",
         fileLoaded: "تم تحميل الملف بنجاح ", woFileLoaded: "تم تحميل ملف أمر العمل ",
         modelSaved: "تم حفظ بيانات النموذج بنجاح ", woProcessed: "تم معالجة أمر العمل بنجاح ",
         productionRecorded: "تم تسجيل الإنتاج بنجاح ", fieldsCleared: "تم مسح الحقول ",
         selectWOOp: "يرجى اختيار أمر العمل والعملية ", selectWO: "يرجى اختيار أمر العمل ",
-        selectWODate: "يرجى اختيار نطاق التاريخ ", inProgress: "قيد التنفيذ ",
-        completedStatus: "مكتمل ", pending: "معلق ", cropping: "قص ",
-        manualPlasma: "بلازما يدوي ", press: "مكبس ", drill: "مثقاب ",
-        chamfering: "حشو ", shear: "قص الصاج ", cncBending: "ثني CNC ",
-        finishing: "تشطيب ", length: "الطول ", quantity: "الكمية ",
-        totalWeight: "الوزن الكلي ", weightProduced: "الوزن المنتج ",
-        creationDate: "تاريخ الإنشاء ", salesOrder: "أمر المبيعات ", project: "المشروع ",
-        machine: "الماكينة ", operator: "العامل ",
+        selectWODate: "يرجى اختيار نطاق التاريخ ", inProgress: "قيد التنفيذ ", completedStatus: "مكتمل ",
+        pending: "معلق ", cropping: "قص ", manualPlasma: "بلازما يدوي ", press: "مكبس ",
+        drill: "مثقاب ", chamfering: "حشو ", shear: "قص الصاج ", cncBending: "ثني CNC ",
+        finishing: "تشطيب ", length: "الطول ", quantity: "الكمية ", totalWeight: "الوزن الكلي ",
+        weightProduced: "الوزن المنتج ", creationDate: "تاريخ الإنشاء ", salesOrder: "أمر المبيعات ",
+        project: "المشروع ", machine: "الماكينة ", operator: "العامل ",
         allWorkOrders: "جميع أوامر العمل ", inProgressWorkOrders: "أوامر العمل الجاري ",
         finishedOrders: "أوامر العمل المنتهية ", processing: "جاري المعالجة... ",
         backupSchedule: "جدول النسخ الاحتياطي ", setAutomaticBackup: "تعيين توقيت النسخ الاحتياطي التلقائي ",
         saveSchedule: "حفظ الجدول ", backupManagement: "إدارة النسخ الاحتياطي ",
-        delete: "حذف ", deleteRecord: "حذف السجل ", deleteModel: "حذف النموذج ",
-        deleteWorkOrder: "حذف أمر الشغل ", confirmDelete: "تأكيد الحذف ",
-        areYouSureDeleteModel: "هل أنت متأكد من حذف هذا النموذج؟ ",
+        delete: "حذف ", deleteRecord: "حذف السجل ", deleteModel: "حذف النموذج ", deleteWorkOrder: "حذف أمر الشغل ",
+        confirmDelete: "تأكيد الحذف ", areYouSureDeleteModel: "هل أنت متأكد من حذف هذا النموذج؟ ",
         areYouSureDeleteWorkOrder: "هل أنت متأكد من حذف أمر الشغل هذا؟ ",
         areYouSureDeleteProduction: "هل أنت متأكد من حذف سجل الإنتاج هذا؟ ",
         areYouSureDeleteDowntime: "هل أنت متأكد من حذف سجل التوقف هذا؟ ",
@@ -1086,19 +1013,15 @@ const translations = {
         workOrderHasProduction: "أمر الشغل هذا يحتوي على سجلات إنتاج ولا يمكن حذفه ",
         confirm: "تأكيد ", cancel: "إلغاء ", recordDeleted: "تم حذف السجل بنجاح ",
         modelDeleted: "تم حذف النموذج بنجاح ", workOrderDeleted: "تم حذف أمر الشغل بنجاح ",
-        productionDeleted: "تم حذف سجل الإنتاج بنجاح ",
-        downtimeDeleted: "تم حذف سجل التوقف بنجاح ",
+        productionDeleted: "تم حذف سجل الإنتاج بنجاح ", downtimeDeleted: "تم حذف سجل التوقف بنجاح ",
         selectReportType: "اختر نوع التقرير ", backupRestore: "إدارة النسخ الاحتياطي ",
         createBackup: "إنشاء نسخة احتياطية ", saveAllData: "حفظ جميع بيانات النظام في ملف JSON ",
         restoreBackup: "استعادة النسخة الاحتياطية ", restoreData: "استعادة البيانات من ملف نسخ احتياطي ",
         downtimeRecording: "تسجيل التوقفات ", downtimeType: "نوع العطل ",
-        selectDowntimeType: "اختر النوع... ",
-        workerName: "اسم العامل ",
-        workerNamePlaceholder: "أدخل اسم العامل... ",
+        selectDowntimeType: "اختر النوع... ", workerName: "اسم العامل ", workerNamePlaceholder: "أدخل اسم العامل... ",
         maintenance: "صيانة ", planningLoad: "تحميل من التخطيط ", materialIssue: "صرف خامات ",
-        laborShortage: "عدم كفاية العمالة ", quality: "جودة ",
-        description: "الوصف ", durationMinutes: "المدة (دقائق) ",
-        recordDowntime: "تسجيل التوقف ", downtimeInfo: "معلومات التوقفات ",
+        laborShortage: "عدم كفاية العمالة ", quality: "جودة ", description: "الوصف ",
+        durationMinutes: "المدة (دقائق) ", recordDowntime: "تسجيل التوقف ", downtimeInfo: "معلومات التوقفات ",
         downtimeHelp: "سجل توقفات الماكينات للتحليل ", downtimeHelp2: "يستخدم في حسابات OEE ",
         downtimeStats: "إحصائيات التوقفات ", downtimeRecords: "سجلات التوقفات ",
         searchDowntime: "بحث في التوقفات... ", records: "سجل ",
@@ -1112,26 +1035,24 @@ const translations = {
         rejectedQty: "الكمية المعيبة ", goodQty: "الكمية السليمة ", saveIdealRates: "حفظ السرعات المثالية ",
         ncrTitle: "عدم المطابقة ", ncrType: "نوع عدم المطابقة ", scrap: "خردة ",
         acceptAsIs: "قبول كما هو ", repair: "إصلاح ", ncrComment: "تعليق ",
-        recordNCR: "تسجيل NCR ", ncrRecords: "سجلات NCR ", searchNCR: "بحث في سجلات NCR... ",
-        ncrDeleted: "تم حذف سجل NCR بنجاح ",
+        ncrCause: "سبب NCR ", recordNCR: "تسجيل NCR ", ncrRecords: "سجلات NCR ",
+        searchNCR: "بحث في سجلات NCR... ", ncrDeleted: "تم حذف سجل NCR بنجاح ",
         areYouSureDeleteNCR: "هل أنت متأكد من حذف سجل NCR هذا؟ ",
         teepTitle: "الأداء الفعال الكلي للمعدات (TEEP) ", teepValue: "TEEP ",
         ncrReport: "تقرير NCR ", oeeReport: "تقرير OEE ", teepReport: "تقرير TEEP ",
         utilization: "الاستغلال ", totalProduction: "إجمالي الإنتاج ", totalRejected: "إجمالي الرفض ",
         hrTitle: "إدارة القوى العاملة (HR) ", employeeName: "اسم الموظف ",
-        employeeId: "رقم الموظف ", department: "القسم ", position: "المنصب ",
-        phone: "الهاتف ", hireDate: "تاريخ التوظيف ", status: "الحالة ",
-        saveEmployee: "حفظ الموظف ", employeeList: "قائمة الموظفين ",
+        employeeId: "رقم الموظف ", department: "القسم ", position: "المنصب ", phone: "الهاتف ",
+        hireDate: "تاريخ التوظيف ", status: "الحالة ", saveEmployee: "حفظ الموظف ", employeeList: "قائمة الموظفين ",
         totalEmployees: "إجمالي الموظفين ", activeEmployees: "نشط ", hrNotes: "ملاحظات الموارد البشرية ",
         employeeDeleted: "تم حذف الموظف بنجاح ",
         areYouSureDeleteEmployee: "هل أنت متأكد من حذف هذا الموظف؟ ",
         balanceComplete: "إكمال كـ Balance ", monthlyProductionReport: "تقرير الإنتاج الشهري ",
-        monthlyReportDesc: "الإنتاج اليومي Minimum و Finish مقابل المستهدف (22 طن)، مع الكفاءة التراكمية ",
+        monthlyReportDesc: "الإنتاج اليومي Minimum و Finish مقابل المستهدف (22 طن) ",
         month: "الشهر ", day: "اليوم ", date: "التاريخ ", target: "المستهدف (طن) ",
         actualMin: "Min (طن) ", actualFin: "Finish (طن) ", effMin: "كفاءة Min % ",
         effFin: "كفاءة Finish % ", cumEffMin: "كفاءة Min تراكمية % ", cumEffFin: "كفاءة Finish تراكمية % ",
-        workingDay: "يوم عمل ", holiday: "إجازة ",
-        noData: "لا توجد بيانات إنتاج لهذا الشهر ", generateMonthlyReport: "إنشاء التقرير الشهري ",
+        workingDay: "يوم عمل ", holiday: "إجازة ", generateMonthlyReport: "إنشاء التقرير الشهري ",
         logout: "تسجيل خروج", loginTitle: "تسجيل الدخول", username: "اسم المستخدم",
         password: "كلمة المرور", role: "الدور", loginButton: "دخول",
         loginHint: "للاختبار: استخدم أي اسم، واختر الدور المناسب",
@@ -1139,8 +1060,26 @@ const translations = {
         rolePlanning: "التخطيط", roleProduction: "الإنتاج", roleQC: "الجودة",
         roleProjects: "المشروعات", roleTopManagement: "الإدارة العليا", roleAdministrator: "مدير النظام",
         markAsFinished: "إنهاء الأمر",
-        markAsFinishedConfirm: "تأكيد إنهاء أمر العمل؟ (اكتمل ≥90%)\nالبنود غير المكتملة ستبقى ويمكن إكمالها لاحقاً.",
-        minCompletionRequired: "يلزم اكتمال 90% على الأقل لإنهاء الأمر"
+        markAsFinishedConfirm: "تأكيد إنهاء أمر العمل؟ (اكتمل ≥90%)",
+        minCompletionRequired: "يلزم اكتمال 90% على الأقل لإنهاء الأمر",
+        soFamilyTree: "شجرة عائلة أوامر البيع",
+        soFamilyTreeDesc: "شجرة هرمية لكل Sales Order متفرع منها Work Orders ",
+        treeSalesOrderFilter: "أمر البيع",
+        treeStatusFilter: "الحالة",
+        treeViewStyle: "نوع العرض",
+        treeDetailView: "🌳 عرض شجري تفصيلي (قابل للطيّ)",
+        treeSummaryView: "📋 عرض ملخّص (صف لكل أمر بيع)",
+        treeDelayDays: "حدّ التأخير (أيام)",
+        treeDelayBasis: "أساس احتساب التأخير",
+        treeBasisAge: "الأيام منذ إنشاء أمر الشغل",
+        treeBasisIdle: "الأيام منذ آخر نشاط إنتاجي",
+        treeStatusAll: "الكل",
+        treeStatusInProgress: "قيد التنفيذ فقط",
+        treeStatusFinished: "المنتهية فقط",
+        treeStatusDelayed: "المتأخرة فقط",
+        generateFamilyTree: "إنشاء شجرة العائلة",
+        noSalesOrdersMatch: "لا توجد أوامر بيع مطابقة",
+        noWorkOrdersMatchFilter: "لا توجد أوامر عمل مطابقة"
     }
 };
 
@@ -1266,9 +1205,7 @@ function renderDashboard() {
     document.getElementById('dashboardFinishedWO').textContent = finishedWorkOrders;
 
     const yesterday = getYesterdayDateStr();
-    const yesterdayProductionRecords = productionDB.filter(rec =>
-        rec.date === yesterday && getOperationPhase(rec.operation) === 'finish'
-    );
+    const yesterdayProductionRecords = productionDB.filter(rec => rec.date === yesterday && getOperationPhase(rec.operation) === 'finish');
     const yesterdayProductionWeight = yesterdayProductionRecords.reduce((sum, rec) => sum + (rec.producedWeight || 0), 0);
     const yesterdayProductionTons = (yesterdayProductionWeight / 1000).toFixed(1);
     document.getElementById('dashboardProductionToday').textContent = `${yesterdayProductionTons} tons`;
@@ -1286,13 +1223,8 @@ function renderDashboard() {
                 const phase = getOperationPhase(op.name);
                 const compQty = item.completedOperations[op.name] ? item.completedOperations[op.name].completedQuantity : 0;
                 const compW = compQty * w;
-                if (phase === 'minimum') {
-                    minTotalWeight += totalW;
-                    minCompletedWeight += Math.min(compW, totalW);
-                } else if (phase === 'finish') {
-                    finTotalWeight += totalW;
-                    finCompletedWeight += Math.min(compW, totalW);
-                }
+                if (phase === 'minimum') { minTotalWeight += totalW; minCompletedWeight += Math.min(compW, totalW); }
+                else if (phase === 'finish') { finTotalWeight += totalW; finCompletedWeight += Math.min(compW, totalW); }
             });
         });
     });
@@ -1350,7 +1282,7 @@ function renderDashboard() {
     renderDashboardMonthlyReport();
 }
 
-// ====== Stage Summary for Dashboard ======
+// ====== Stage Summary ======
 function computeStageSummary(scope) {
     const agg = {};
     const stages = ['minimum', 'crop', 'shear', 'bend', 'drill', 'chamfer', 'finish', 'general'];
@@ -1367,10 +1299,8 @@ function computeStageSummary(scope) {
                 let done = comp ? (parseInt(comp.completedQuantity) || 0) : 0;
                 if (done > qty) done = qty;
                 if (done < 0) done = 0;
-                bucket.totalQty += qty;
-                bucket.doneQty += done;
-                bucket.totalWt += qty * wpp;
-                bucket.doneWt += done * wpp;
+                bucket.totalQty += qty; bucket.doneQty += done;
+                bucket.totalWt += qty * wpp; bucket.doneWt += done * wpp;
             });
         });
     });
@@ -1511,8 +1441,7 @@ function computeMonthlyReportData(year, month) {
             cumulativeTarget += targetTons;
             effMin = targetTons > 0 ? (minTons / targetTons) * 100 : 0;
             effFin = targetTons > 0 ? (finTons / targetTons) * 100 : 0;
-            cumMin += minTons;
-            cumFin += finTons;
+            cumMin += minTons; cumFin += finTons;
         }
         const cumEffMin = cumulativeTarget > 0 ? (cumMin / cumulativeTarget) * 100 : 0;
         const cumEffFin = cumulativeTarget > 0 ? (cumFin / cumulativeTarget) * 100 : 0;
@@ -1521,20 +1450,9 @@ function computeMonthlyReportData(year, month) {
             const baseHoliday = translations[currentLanguage].holiday || 'Holiday';
             if (isFriday) statusText = currentLanguage === 'ar' ? `${baseHoliday} (جمعة)` : `${baseHoliday} (Friday)`;
             else statusText = currentLanguage === 'ar' ? `${baseHoliday} (لا يوجد إنتاج)` : `${baseHoliday} (No Production)`;
-        } else {
-            statusText = translations[currentLanguage].workingDay || 'Working';
-        }
+        } else statusText = translations[currentLanguage].workingDay || 'Working';
         const statusClass = isHoliday ? 'badge-warning' : 'badge-success';
-        reportData.push({
-            date: dateStr, dateObj: dateObj, dayOfWeek: dayOfWeek,
-            isHoliday: isHoliday, isFriday: isFriday,
-            minTons: minTons, finTons: finTons,
-            effMin: effMin, effFin: effFin,
-            cumEffMin: cumEffMin, cumEffFin: cumEffFin,
-            statusText: statusText, statusClass: statusClass,
-            workingDays: workingDays, cumMin: cumMin, cumFin: cumFin,
-            cumulativeTarget: cumulativeTarget
-        });
+        reportData.push({ date: dateStr, dateObj, dayOfWeek, isHoliday, isFriday, minTons, finTons, effMin, effFin, cumEffMin, cumEffFin, statusText, statusClass, workingDays, cumMin, cumFin, cumulativeTarget });
     }
     return reportData;
 }
@@ -1550,7 +1468,7 @@ async function generateMonthlyProductionReport() {
     const body = document.getElementById('reportTableBody');
     header.innerHTML = `<tr><th>#</th><th>Date</th><th>Day</th><th>Min (tons)</th><th>Finish (tons)</th><th>Target (tons)</th><th>Min Eff %</th><th>Finish Eff %</th><th>Cum. Min Eff %</th><th>Cum. Finish Eff %</th><th>Status</th></tr>`;
     if (reportData.length === 0) {
-        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">${translations[currentLanguage].noData || 'No production data for this month'}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">${translations[currentLanguage].noData || 'No production data'}</td></tr>`;
     } else {
         const rows = [];
         reportData.forEach((row, idx) => {
@@ -1584,7 +1502,7 @@ function renderDashboardMonthlyReport() {
     if (monthSpan) monthSpan.textContent = monthLabel;
     head.innerHTML = `<tr><th>#</th><th>Date</th><th>Day</th><th>Min (tons)</th><th>Finish (tons)</th><th>Target (tons)</th><th>Min Eff %</th><th>Finish Eff %</th><th>Cum. Min Eff %</th><th>Cum. Finish Eff %</th><th>Status</th></tr>`;
     if (reportData.length === 0) {
-        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">${translations[currentLanguage].noData || 'No production data for this month'}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" class="text-center py-4">${translations[currentLanguage].noData || 'No production data'}</td></tr>`;
     } else {
         const rows = [];
         reportData.forEach((row, idx) => {
@@ -1600,6 +1518,485 @@ function renderDashboardMonthlyReport() {
         rows.push(`<tr class="total-row" style="background:#fef3c7;font-weight:700;"><td class="text-center"></td><td class="text-center font-bold" colspan="2">TOTAL / AVERAGE</td><td class="text-center font-bold">${totalCumMin.toFixed(2)}</td><td class="text-center font-bold">${totalCumFin.toFixed(2)}</td><td class="text-center"></td><td class="text-center font-bold">${overallMinEff.toFixed(1)}%</td><td class="text-center font-bold">${overallFinEff.toFixed(1)}%</td><td class="text-center font-bold" colspan="2"></td><td class="text-center">Working Days: ${totalWorkingDays}</td></tr>`);
         body.innerHTML = rows.join('');
     }
+}
+
+// ============================================================================
+// ✅ SALES ORDER FAMILY TREE v2.3.0 — شجرة عائلة أوامر البيع
+//    جدول شجري قابل للطيّ + مؤشرات علوية + تنبيه التأخير + بحث وفرز
+// ============================================================================
+const SO_TREE_SETTINGS_KEY = 'soTreeDelaySettings';
+const SO_TREE_DAY_MS = 86400000;
+let soTreeState = {
+    expanded: new Set(), lastNames: [],
+    soFilter: '', statusFilter: 'all', viewStyle: 'detail',
+    delayDays: 30, basis: 'age',
+    search: '', sort: 'so', searchTimer: null
+};
+
+function soTreeT(key, fallback) {
+    const t = (typeof translations !== 'undefined' && translations[currentLanguage]) ? translations[currentLanguage] : {};
+    return (t[key] || fallback || '').toString().trim();
+}
+
+// ---------- إعدادات التأخير (محفوظة محلياً) ----------
+function soTreeLoadSettings() {
+    try {
+        const s = JSON.parse(localStorage.getItem(SO_TREE_SETTINGS_KEY) || 'null');
+        if (s && Number(s.days) > 0) return { days: Math.round(Number(s.days)), basis: s.basis === 'idle' ? 'idle' : 'age' };
+    } catch (e) { /* ignore */ }
+    return { days: 30, basis: 'age' };
+}
+function soTreeSaveSettings(days, basis) {
+    try { localStorage.setItem(SO_TREE_SETTINGS_KEY, JSON.stringify({ days, basis })); } catch (e) { /* ignore */ }
+}
+
+// ---------- أدوات التاريخ ----------
+function soTreeDaysSince(ms) {
+    if (!ms || isNaN(ms)) return null;
+    return Math.max(0, Math.floor((Date.now() - ms) / SO_TREE_DAY_MS));
+}
+function soTreeParseDate(str) {
+    if (typeof str === 'string' && /^\d{4}-\d{2}-\d{2}/.test(str)) {
+        const d = new Date(str.slice(0, 10) + 'T00:00:00');
+        return isNaN(d.getTime()) ? null : d.getTime();
+    }
+    return null;
+}
+function soTreeFmtDate(ms) { return ms ? getLocalDateStr(new Date(ms)) : ''; }
+
+// آخر نشاط إنتاجي لكل أمر شغل (من سجلات الإنتاج)
+function soTreeBuildLastActivityMap() {
+    const m = new Map();
+    (productionDB || []).forEach(r => {
+        if (r.workOrderId === undefined || r.workOrderId === null) return;
+        const t = soTreeParseDate(r.date) || r.timestamp || 0;
+        if (!t) return;
+        const k = String(r.workOrderId);
+        if (!m.has(k) || t > m.get(k)) m.set(k, t);
+    });
+    return m;
+}
+
+function soTreeDelayInfo(wo, isActive, lastAct, days, basis) {
+    const created = wo.timestamp || soTreeParseDate(wo.date) || null;
+    const ageDays = soTreeDaysSince(created);
+    const lastTs = lastAct.get(String(wo.id));
+    const idleDays = lastTs ? soTreeDaysSince(lastTs) : ageDays;
+    const metric = basis === 'idle' ? idleDays : ageDays;
+    let level = 'ok';
+    if (isActive && metric !== null) {
+        if (metric > days * 2) level = 'critical';
+        else if (metric > days) level = 'delayed';
+    }
+    return { created, ageDays, idleDays, metric, level };
+}
+
+// ---------- تجميع البيانات ----------
+function soTreeCollectBuckets() {
+    const st = soTreeState;
+    const q = (st.search || '').trim().toLowerCase();
+    const lastAct = soTreeBuildLastActivityMap();
+    const soMap = new Map();
+
+    workOrdersDB.forEach(wo => {
+        const so = wo.salesOrderNumber || 'N/A';
+        if (st.soFilter && so !== st.soFilter) return;
+        const items = wo.items || [];
+        const isFinished = isWorkOrderCompleted(wo);
+        const isArchived = wo.archived === true;
+        const isActive = !isFinished && !isArchived;
+
+        let woTotalWt = 0, woDoneWt = 0, doneItems = 0;
+        items.forEach(item => {
+            if (item.status === 'Completed') doneItems++;
+            const wpp = item.weightPerPiece || 0;
+            const qty = item.quantity || 0;
+            woTotalWt += qty * wpp;
+            woDoneWt += Math.min(item.completedQuantity || 0, qty) * wpp;
+        });
+        let pct = woTotalWt > 0 ? (woDoneWt / woTotalWt) * 100 : getWorkOrderCompletionPercentage(wo);
+        pct = Math.max(0, Math.min(100, pct || 0));
+
+        const delay = soTreeDelayInfo(wo, isActive, lastAct, st.delayDays, st.basis);
+        const entry = { wo, isFinished, isArchived, isActive, pct, woTotalWt, woDoneWt, doneItems, totalItems: items.length, delay };
+
+        const f = st.statusFilter;
+        const include = f === 'all'
+            || (f === 'inprogress' && isActive)
+            || (f === 'finished' && (isFinished || isArchived))
+            || (f === 'delayed' && isActive && delay.level !== 'ok');
+        if (!include) return;
+
+        if (q) {
+            const hay = [so, wo.projectName, wo.workOrderName, wo.type, wo.model].join(' ').toLowerCase();
+            if (!hay.includes(q)) return;
+        }
+
+        if (!soMap.has(so)) soMap.set(so, { salesOrder: so, projects: new Set(), workOrders: [] });
+        const b = soMap.get(so);
+        if (wo.projectName) b.projects.add(wo.projectName);
+        b.workOrders.push(entry);
+    });
+
+    const buckets = [...soMap.values()];
+    buckets.forEach(b => {
+        b.workOrders.sort((a, c) => (c.wo.timestamp || 0) - (a.wo.timestamp || 0));
+        b.totalWOs = b.workOrders.length;
+        b.finishedWOs = b.workOrders.filter(e => e.isFinished || e.isArchived).length;
+        b.archivedWOs = b.workOrders.filter(e => e.isArchived).length;
+        b.activeWOs = b.workOrders.filter(e => e.isActive).length;
+        b.delayedWOs = b.workOrders.filter(e => e.isActive && e.delay.level === 'delayed').length;
+        b.criticalWOs = b.workOrders.filter(e => e.isActive && e.delay.level === 'critical').length;
+        b.totalItems = b.workOrders.reduce((s, e) => s + e.totalItems, 0);
+        b.completedItems = b.workOrders.reduce((s, e) => s + e.doneItems, 0);
+        b.totalWeight = b.workOrders.reduce((s, e) => s + e.woTotalWt, 0);
+        b.completedWeight = b.workOrders.reduce((s, e) => s + e.woDoneWt, 0);
+        b.pct = b.totalWeight > 0 ? (b.completedWeight / b.totalWeight * 100) : 0;
+        const metrics = b.workOrders.filter(e => e.isActive && e.delay.metric !== null).map(e => e.delay.metric);
+        b.maxMetric = metrics.length ? Math.max(...metrics) : null;
+        b.level = b.criticalWOs > 0 ? 'critical' : (b.delayedWOs > 0 ? 'delayed' : 'ok');
+        b.status = b.activeWOs === 0
+            ? (b.archivedWOs > 0 ? 'Finished (Archived)' : 'Completed')
+            : (b.pct > 0 ? 'In Progress' : 'Not Started');
+    });
+    return soTreeSortBuckets(buckets, st.sort);
+}
+
+function soTreeSortBuckets(buckets, sort) {
+    const byName = (a, b) => String(a.salesOrder).localeCompare(String(b.salesOrder), undefined, { numeric: true });
+    const rank = { critical: 2, delayed: 1, ok: 0 };
+    const arr = [...buckets];
+    if (sort === 'delayFirst') {
+        arr.sort((a, b) => (rank[b.level] - rank[a.level]) || ((b.maxMetric || 0) - (a.maxMetric || 0)) || byName(a, b));
+    } else if (sort === 'progressAsc') {
+        arr.sort((a, b) => ((a.activeWOs === 0) - (b.activeWOs === 0)) || (a.pct - b.pct) || byName(a, b));
+    } else if (sort === 'weightDesc') {
+        arr.sort((a, b) => (b.totalWeight - a.totalWeight) || byName(a, b));
+    } else {
+        arr.sort(byName);
+    }
+    return arr;
+}
+
+// ---------- عناصر العرض المشتركة ----------
+const soTreeFmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
+const soTreeFmtTon = (kg) => ((Number(kg) || 0) / 1000).toFixed(2);
+
+function soTreePctColor(p) {
+    if (p >= 100) return '#059669';
+    if (p >= 50) return '#d97706';
+    if (p > 0) return '#ea580c';
+    return '#dc2626';
+}
+function soTreeProgressCell(pct) {
+    const c = soTreePctColor(pct);
+    return `<div class="so-pbar"><div class="so-pbar-fill" style="width:${pct.toFixed(1)}%;background:${c};"></div></div><span style="font-weight:700;color:${c};">${pct.toFixed(1)}%</span>`;
+}
+function soTreeStatusBadge(text) {
+    let cls = 'so-badge-neutral';
+    if (text === 'Completed' || text === 'Finished') cls = 'so-badge-ok';
+    else if (text === 'Finished (Archived)' || text === 'Archived') cls = 'so-badge-archived';
+    else if (text === 'In Progress') cls = 'so-badge-progress';
+    else if (text === 'Not Started') cls = 'so-badge-notstarted';
+    return `<span class="so-badge ${cls}">${text}</span>`;
+}
+function soTreeStackBar(b) {
+    if (!b.totalWOs) return '';
+    const seg = (n, c, label) => n > 0 ? `<div title="${label}: ${n}" style="width:${(n / b.totalWOs * 100).toFixed(2)}%;background:${c};"></div>` : '';
+    const onTrack = b.activeWOs - b.delayedWOs - b.criticalWOs;
+    const finishedOnly = b.finishedWOs - b.archivedWOs;
+    return `<div class="so-stack">${seg(finishedOnly, '#059669', 'Finished')}${seg(b.archivedWOs, '#7c3aed', 'Archived')}${seg(onTrack, '#f59e0b', 'In progress')}${seg(b.delayedWOs, '#ea580c', 'Delayed')}${seg(b.criticalWOs, '#dc2626', 'Critical')}</div>`;
+}
+function soTreeMetricLabel() { return soTreeState.basis === 'idle' ? 'Idle (days)' : 'Age (days)'; }
+function soTreeMetricCell(metric, level, active) {
+    if (!active || metric === null || metric === undefined) return '-';
+    const color = level === 'critical' ? '#dc2626' : (level === 'delayed' ? '#d97706' : '#334155');
+    return `<span style="font-weight:700;color:${color};">${metric}</span>`;
+}
+function soTreeWoAlertHtml(e) {
+    if (!e.isActive) return '<span class="so-badge so-badge-neutral">-</span>';
+    const d = e.delay;
+    if (d.metric === null) return '<span class="so-badge so-badge-neutral">N/A</span>';
+    if (d.level === 'critical') return `<span class="so-badge so-badge-critical"><i class="fa-solid fa-triangle-exclamation"></i> Critical ${d.metric}d</span>`;
+    if (d.level === 'delayed') return `<span class="so-badge so-badge-delayed"><i class="fa-solid fa-clock"></i> Delayed ${d.metric}d</span>`;
+    return '<span class="so-badge so-badge-ok">On track</span>';
+}
+function soTreeSoAlertHtml(b) {
+    if (b.activeWOs === 0) return '<span class="so-badge so-badge-neutral">-</span>';
+    if (b.level === 'critical') {
+        const extra = b.delayedWOs > 0 ? ` / ${b.delayedWOs} delayed` : '';
+        return `<span class="so-badge so-badge-critical"><i class="fa-solid fa-triangle-exclamation"></i> ${b.criticalWOs} critical${extra}</span>`;
+    }
+    if (b.level === 'delayed') return `<span class="so-badge so-badge-delayed"><i class="fa-solid fa-clock"></i> ${b.delayedWOs} delayed</span>`;
+    return '<span class="so-badge so-badge-ok">On track</span>';
+}
+
+// ---------- المؤشرات العلوية ----------
+function soTreeKpiHtml(buckets) {
+    const st = soTreeState;
+    const sum = (k) => buckets.reduce((s, b) => s + b[k], 0);
+    const totalWOs = sum('totalWOs'), finished = sum('finishedWOs'), active = sum('activeWOs');
+    const delayed = sum('delayedWOs'), critical = sum('criticalWOs');
+    const totalWt = sum('totalWeight'), doneWt = sum('completedWeight');
+    const overall = totalWt > 0 ? (doneWt / totalWt * 100) : 0;
+    const lateTotal = delayed + critical;
+    const card = (bg, label, value, sub, extra) => `
+        <div ${extra || ''} style="background:${bg};color:#fff;padding:0.85rem 1rem;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+            <div style="font-size:0.7rem;opacity:0.85;text-transform:uppercase;letter-spacing:0.5px;">${label}</div>
+            <div style="font-size:1.7rem;font-weight:800;line-height:1.2;">${value}</div>
+            <div style="font-size:0.7rem;opacity:0.85;min-height:1em;">${sub || ''}</div>
+        </div>`;
+    const basisTxt = st.basis === 'idle' ? 'no production activity' : 'since creation';
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.7rem;margin-bottom:0.9rem;">
+        ${card('linear-gradient(135deg,#0369a1,#075985)', 'Sales Orders', buckets.length, '')}
+        ${card('linear-gradient(135deg,#059669,#047857)', 'Finished WOs', `${finished}<span style="font-size:0.85rem;opacity:0.8;"> / ${totalWOs}</span>`, '')}
+        ${card('linear-gradient(135deg,#d97706,#b45309)', 'Active WOs', active, '')}
+        ${card(lateTotal > 0 ? 'linear-gradient(135deg,#dc2626,#991b1b)' : 'linear-gradient(135deg,#64748b,#475569)', 'Delay Alerts', lateTotal, lateTotal > 0 ? `${critical} critical • ${delayed} delayed (click to filter)` : 'No delayed work orders', lateTotal > 0 ? 'onclick="soTreeFilterDelayed()" style="cursor:pointer;"' : '')}
+        ${card('linear-gradient(135deg,#7c3aed,#6d28d9)', 'Overall Progress', overall.toFixed(1) + '%', 'by weight')}
+        ${card('linear-gradient(135deg,#0f766e,#115e59)', 'Weight (ton)', `<span style="font-size:1.3rem;">${soTreeFmtTon(doneWt)} / ${soTreeFmtTon(totalWt)}</span>`, '')}
+    </div>
+    <div style="font-size:0.72rem;color:#64748b;margin-bottom:0.6rem;">
+        <i class="fa-solid fa-circle-info"></i> Delay rule: an active work order is <strong style="color:#d97706;">Delayed</strong> after more than ${st.delayDays} day(s) ${basisTxt}, and <strong style="color:#dc2626;">Critical</strong> after more than ${st.delayDays * 2} days.
+    </div>`;
+}
+
+function soTreeToolbarHtml() {
+    const st = soTreeState;
+    const opt = (v, t, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${t}</option>`;
+    const isDetail = st.viewStyle !== 'summary';
+    return `<div class="no-print" style="display:flex;flex-wrap:wrap;gap:0.6rem;align-items:center;margin-bottom:0.8rem;">
+        <input id="soTreeSearch" type="text" class="input-field" style="max-width:260px;" placeholder="Search SO / project / work order..." value="${esc(st.search)}" oninput="soTreeSetSearch(this.value)">
+        <select id="soTreeSort" class="input-field" style="max-width:230px;" onchange="soTreeSetSort(this.value)">
+            ${opt('so', 'Sort: Sales Order No.', st.sort)}
+            ${opt('delayFirst', 'Sort: Most delayed first', st.sort)}
+            ${opt('progressAsc', 'Sort: Lowest progress first', st.sort)}
+            ${opt('weightDesc', 'Sort: Heaviest first', st.sort)}
+        </select>
+        ${isDetail ? `
+        <button type="button" class="btn btn-sm" style="border:1px solid #cbd5e1;background:#fff;color:#1e3a8a;" onclick="soTreeExpandAll(true)"><i class="fa-solid fa-angles-down"></i> Expand all</button>
+        <button type="button" class="btn btn-sm" style="border:1px solid #cbd5e1;background:#fff;color:#1e3a8a;" onclick="soTreeExpandAll(false)"><i class="fa-solid fa-angles-up"></i> Collapse all</button>` : ''}
+        <span style="font-size:0.72rem;color:#64748b;display:flex;gap:0.8rem;flex-wrap:wrap;">
+            <span><span class="so-dot" style="background:#059669;"></span>Finished</span>
+            <span><span class="so-dot" style="background:#7c3aed;"></span>Archived</span>
+            <span><span class="so-dot" style="background:#f59e0b;"></span>In progress</span>
+            <span><span class="so-dot" style="background:#ea580c;"></span>Delayed</span>
+            <span><span class="so-dot" style="background:#dc2626;"></span>Critical</span>
+        </span>
+    </div>`;
+}
+
+// ---------- التوليد (نقطة الدخول من النموذج) ----------
+function generateSalesOrderTree() {
+    if (!hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض التقارير', 'error'); return; }
+    const st = soTreeState;
+    const saved = soTreeLoadSettings();
+
+    st.soFilter = document.getElementById('treeSalesOrderFilter')?.value || '';
+    st.statusFilter = document.getElementById('treeStatusFilter')?.value || 'all';
+    st.viewStyle = document.getElementById('treeViewStyle')?.value === 'summary' ? 'summary' : 'detail';
+    const daysInput = parseInt(document.getElementById('treeDelayDays')?.value, 10);
+    st.delayDays = daysInput > 0 ? daysInput : saved.days;
+    st.basis = (document.getElementById('treeDelayBasis')?.value || saved.basis) === 'idle' ? 'idle' : 'age';
+    soTreeSaveSettings(st.delayDays, st.basis);
+
+    // الوضع الافتراضي للطيّ: مفتوح إذا كان العرض محدوداً، مطويّ إذا كان كبيراً
+    const preview = soTreeCollectBuckets();
+    const expandAll = !!st.soFilter || st.statusFilter === 'delayed' || preview.length <= 3;
+    st.expanded = new Set(expandAll ? preview.map(b => b.salesOrder) : []);
+
+    document.getElementById('reportTitle').textContent = 'Sales Order Family Tree' + (st.soFilter ? ` - ${st.soFilter}` : '');
+    const strip = document.getElementById('reportSummaryStrip');
+    if (strip) strip.innerHTML = '<div id="soTreeKpis"></div>' + soTreeToolbarHtml();
+
+    soTreeRefresh();
+    document.getElementById('reportResults').classList.remove('hidden');
+    document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
+    showToast('Sales Order family tree generated', 'success');
+}
+
+// إعادة الرسم (بعد البحث أو الفرز) دون إعادة بناء شريط الأدوات
+function soTreeRefresh() {
+    const st = soTreeState;
+    const buckets = soTreeCollectBuckets();
+    st.lastNames = buckets.map(b => b.salesOrder);
+
+    const kpis = document.getElementById('soTreeKpis');
+    if (kpis) kpis.innerHTML = soTreeKpiHtml(buckets);
+
+    const header = document.getElementById('reportTableHeader');
+    const body = document.getElementById('reportTableBody');
+
+    if (buckets.length === 0) {
+        header.innerHTML = '';
+        body.innerHTML = `<tr><td class="text-center py-8 text-gray-500">${soTreeT('noSalesOrdersMatch', 'No Sales Orders match the current filter')}</td></tr>`;
+        return;
+    }
+    if (st.viewStyle === 'summary') soTreeRenderSummary(buckets, header, body);
+    else soTreeRenderDetail(buckets, header, body);
+}
+
+// ---------- العرض التفصيلي (شجري قابل للطيّ) ----------
+function soTreeRenderDetail(buckets, header, body) {
+    const st = soTreeState;
+    const searching = !!(st.search || '').trim();
+    header.innerHTML = `<tr>
+        <th style="width:24%">Sales Order → Work Order</th>
+        <th>Project</th><th>Type / Model</th><th>Created</th>
+        <th>${soTreeMetricLabel()}</th><th>Items</th><th style="min-width:110px">Progress %</th>
+        <th>Done Weight (ton)</th><th>Total Weight (ton)</th><th>Status</th><th>Delay Alert</th>
+    </tr>`;
+
+    let html = '';
+    buckets.forEach(b => {
+        const open = searching || st.expanded.has(b.salesOrder);
+        html += `<tr class="so-row${open ? ' open' : ''}" data-so="${esc(b.salesOrder)}" onclick="soTreeToggle(this.dataset.so)" title="Click to expand / collapse">
+            <td style="text-align:left;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <i class="fa-solid fa-chevron-right so-chev"></i>
+                    <i class="fa-solid fa-folder-open text-blue-700"></i>
+                    <div style="flex:1;min-width:150px;">
+                        <div style="font-weight:800;color:#0c4a6e;font-size:0.95rem;">${esc(b.salesOrder)}</div>
+                        <div style="font-size:0.7rem;color:#0369a1;"> ${b.totalWOs} work order(s) • ${b.finishedWOs} finished</div>
+                        ${soTreeStackBar(b)}
+                    </div>
+                </div>
+            </td>
+            <td class="text-center" style="font-size:0.78rem;">${[...b.projects].map(esc).join(' • ')}</td>
+            <td class="text-center"></td>
+            <td class="text-center"></td>
+            <td class="text-center">${soTreeMetricCell(b.maxMetric, b.level, b.activeWOs > 0)}</td>
+            <td class="text-center font-bold">${b.completedItems}/${b.totalItems}</td>
+            <td class="text-center">${soTreeProgressCell(b.pct)}</td>
+            <td class="text-center font-bold">${soTreeFmtTon(b.completedWeight)}</td>
+            <td class="text-center font-bold">${soTreeFmtTon(b.totalWeight)}</td>
+            <td class="text-center">${soTreeStatusBadge(b.status)}</td>
+            <td class="text-center">${soTreeSoAlertHtml(b)}</td>
+        </tr>`;
+
+        b.workOrders.forEach((e, idx) => {
+            const wo = e.wo;
+            const isLast = idx === b.workOrders.length - 1;
+            const cls = 'so-wo-row' + (e.isActive && e.delay.level !== 'ok' ? ' ' + e.delay.level : '');
+            let woStatus = 'In Progress';
+            if (e.isArchived) woStatus = 'Archived';
+            else if (e.isFinished) woStatus = 'Finished';
+            else if (e.pct === 0) woStatus = 'Not Started';
+            const iconColor = e.isArchived ? '#7c3aed' : (e.isFinished ? '#059669' : '#d97706');
+            html += `<tr class="${cls}" data-so="${esc(b.salesOrder)}" style="${open ? '' : 'display:none;'}">
+                <td style="text-align:left;padding-left:2rem;">
+                    <div style="display:flex;align-items:center;gap:0.45rem;">
+                        <span class="so-conn${isLast ? ' last' : ''}"></span>
+                        <i class="fa-solid fa-file-lines" style="color:${iconColor};"></i>
+                        <span style="font-weight:700;color:#1e293b;">${esc(wo.workOrderName)}</span>
+                    </div>
+                </td>
+                <td class="text-center" style="font-size:0.78rem;">${esc(wo.projectName)}</td>
+                <td class="text-center" style="font-size:0.78rem;">${esc(wo.type)} / ${esc(wo.model)}</td>
+                <td class="text-center" style="font-size:0.78rem;">${esc(soTreeFmtDate(e.delay.created) || wo.date || '')}</td>
+                <td class="text-center">${soTreeMetricCell(e.delay.metric, e.delay.level, e.isActive)}</td>
+                <td class="text-center" style="font-size:0.78rem;">${e.doneItems}/${e.totalItems}</td>
+                <td class="text-center">${soTreeProgressCell(e.pct)}</td>
+                <td class="text-center" style="font-size:0.78rem;">${soTreeFmtTon(e.woDoneWt)}</td>
+                <td class="text-center" style="font-size:0.78rem;">${soTreeFmtTon(e.woTotalWt)}</td>
+                <td class="text-center">${soTreeStatusBadge(woStatus)}</td>
+                <td class="text-center">${soTreeWoAlertHtml(e)}</td>
+            </tr>`;
+        });
+    });
+    html += soTreeTotalRow(buckets, 11, true);
+    body.innerHTML = html;
+}
+
+// ---------- العرض الملخّص (صف لكل أمر بيع) ----------
+function soTreeRenderSummary(buckets, header, body) {
+    header.innerHTML = `<tr>
+        <th style="width:22%">Sales Order</th><th>Project(s)</th><th>WOs (Finished/Total)</th><th>Items</th>
+        <th style="min-width:110px">Progress %</th><th>Done Weight (ton)</th><th>Total Weight (ton)</th>
+        <th>${soTreeMetricLabel()}</th><th>Status</th><th>Delay Alert</th>
+    </tr>`;
+    let html = '';
+    buckets.forEach(b => {
+        html += `<tr class="so-row so-row-static">
+            <td style="text-align:left;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <i class="fa-solid fa-folder-open text-blue-700"></i>
+                    <div style="flex:1;min-width:140px;">
+                        <div style="font-weight:800;color:#0c4a6e;font-size:0.95rem;">${esc(b.salesOrder)}</div>
+                        ${soTreeStackBar(b)}
+                    </div>
+                </div>
+            </td>
+            <td class="text-center" style="font-size:0.78rem;">${[...b.projects].map(esc).join(' • ')}</td>
+            <td class="text-center font-bold">${b.finishedWOs}/${b.totalWOs}</td>
+            <td class="text-center font-bold">${b.completedItems}/${b.totalItems}</td>
+            <td class="text-center">${soTreeProgressCell(b.pct)}</td>
+            <td class="text-center font-bold">${soTreeFmtTon(b.completedWeight)}</td>
+            <td class="text-center font-bold">${soTreeFmtTon(b.totalWeight)}</td>
+            <td class="text-center">${soTreeMetricCell(b.maxMetric, b.level, b.activeWOs > 0)}</td>
+            <td class="text-center">${soTreeStatusBadge(b.status)}</td>
+            <td class="text-center">${soTreeSoAlertHtml(b)}</td>
+        </tr>`;
+    });
+    html += soTreeTotalRow(buckets, 10, false);
+    body.innerHTML = html;
+}
+
+// صف الإجمالي (يظهر في Excel/PDF/الطباعة)
+function soTreeTotalRow(buckets, cols, detail) {
+    const sum = (k) => buckets.reduce((s, b) => s + b[k], 0);
+    const totalWt = sum('totalWeight'), doneWt = sum('completedWeight');
+    const pct = totalWt > 0 ? (doneWt / totalWt * 100) : 0;
+    const late = sum('delayedWOs') + sum('criticalWOs');
+    const items = `${sum('completedItems')}/${sum('totalItems')}`;
+    const alert = late > 0 ? `${late} delayed/critical` : 'On track';
+    if (detail) {
+        return `<tr class="so-total-row"><td style="text-align:left;">TOTAL (${buckets.length} SO / ${sum('totalWOs')} WO)</td><td></td><td></td><td></td><td></td>
+            <td class="text-center">${items}</td><td class="text-center">${pct.toFixed(1)}%</td>
+            <td class="text-center">${soTreeFmtTon(doneWt)}</td><td class="text-center">${soTreeFmtTon(totalWt)}</td><td></td><td class="text-center">${alert}</td></tr>`;
+    }
+    return `<tr class="so-total-row"><td style="text-align:left;">TOTAL (${buckets.length} SO)</td><td></td>
+        <td class="text-center">${sum('finishedWOs')}/${sum('totalWOs')}</td><td class="text-center">${items}</td>
+        <td class="text-center">${pct.toFixed(1)}%</td><td class="text-center">${soTreeFmtTon(doneWt)}</td><td class="text-center">${soTreeFmtTon(totalWt)}</td>
+        <td></td><td></td><td class="text-center">${alert}</td></tr>`;
+}
+
+// ---------- التفاعل ----------
+function soTreeApplyExpansion() {
+    const st = soTreeState;
+    const searching = !!(st.search || '').trim();
+    document.querySelectorAll('#reportTableBody tr.so-row[data-so]').forEach(tr => {
+        const open = searching || st.expanded.has(tr.dataset.so);
+        tr.classList.toggle('open', open);
+    });
+    document.querySelectorAll('#reportTableBody tr.so-wo-row').forEach(tr => {
+        const open = searching || st.expanded.has(tr.dataset.so);
+        tr.style.display = open ? '' : 'none';
+    });
+}
+function soTreeToggle(name) {
+    const st = soTreeState;
+    if (st.expanded.has(name)) st.expanded.delete(name); else st.expanded.add(name);
+    soTreeApplyExpansion();
+}
+function soTreeExpandAll(open) {
+    const st = soTreeState;
+    st.expanded = new Set(open ? st.lastNames : []);
+    soTreeApplyExpansion();
+}
+function soTreeSetSearch(value) {
+    const st = soTreeState;
+    st.search = value || '';
+    clearTimeout(st.searchTimer);
+    st.searchTimer = setTimeout(soTreeRefresh, 150);
+}
+function soTreeSetSort(value) {
+    soTreeState.sort = value || 'so';
+    soTreeRefresh();
+}
+function soTreeFilterDelayed() {
+    const sel = document.getElementById('treeStatusFilter');
+    if (sel) sel.value = 'delayed';
+    generateSalesOrderTree();
 }
 
 // ====== Populate Dropdowns ======
@@ -1826,17 +2223,14 @@ function renderWorkOrdersList() {
 }
 
 async function markWorkOrderAsFinished(id) {
-    if (!hasPermission('canMarkAsFinished')) { showToast('❌ غير مسموح لك بإنهاء أوامر العمل. هذه الصلاحية للمدير فقط.', 'error'); return; }
+    if (!hasPermission('canMarkAsFinished')) { showToast('❌ غير مسموح لك بإنهاء أوامر العمل.', 'error'); return; }
     const t = translations[currentLanguage];
     const wo = workOrdersDB.find(w => w.id === id);
     if (!wo) return;
     if (wo.archived) { showToast('⚠️ Work order is already finished', 'warning'); return; }
     const percent = getWorkOrderCompletionPercentage(wo);
-    if (percent < 90) {
-        showToast(`${t.minCompletionRequired || 'Minimum 90% completion required'} (${percent.toFixed(1)}%)`, 'warning');
-        return;
-    }
-    if (confirm(t.markAsFinishedConfirm || `Mark work order "${wo.workOrderName}" as Finished?`)) {
+    if (percent < 90) { showToast(`${t.minCompletionRequired} (${percent.toFixed(1)}%)`, 'warning'); return; }
+    if (confirm(t.markAsFinishedConfirm)) {
         wo.archived = true;
         await saveToServer('workOrdersDB', workOrdersDB);
         await createProductionRecordsForArchivedOrders();
@@ -1947,10 +2341,7 @@ async function approveItem(workOrderId, itemIndex) {
     item.completedQuantity = recalcItemCompletedQuantity(item);
     recalcItemStatus(item);
     const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
-    if (!woSaveResult || !woSaveResult.success) {
-        showToast('تعذّر حفظ تحديث أمر الشغل على الخادم، لم يتم تسجيل الإنتاج.', 'error');
-        return;
-    }
+    if (!woSaveResult || !woSaveResult.success) { showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
     await flushNewProductionRecords();
     showWorkOrderDetails(workOrderId); renderWorkOrdersList(); renderDashboard();
     updateStats(); await updateIdealRatesFromActual();
@@ -1992,7 +2383,7 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
     const completionDate = prompt('Enter completion date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
     if (!completionDate || !/^\d{4}-\d{2}-\d{2}$/.test(completionDate)) { showToast('Invalid or missing date', 'warning'); return; }
     if (!confirm(`Complete item "${item.itemName}" with remaining ${remaining} pcs as Balance on ${completionDate}?`)) return;
-    showLoading(translations[currentLanguage].processing || 'Processing...');
+    showLoading(translations[currentLanguage].processing);
     try {
         let updated = false;
         for (const op of item.operations) {
@@ -2026,11 +2417,7 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
         item.completedQuantity = recalcItemCompletedQuantity(item);
         recalcItemStatus(item);
         const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
-        if (!woSaveResult || !woSaveResult.success) {
-            hideLoading();
-            showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error');
-            return;
-        }
+        if (!woSaveResult || !woSaveResult.success) { hideLoading(); showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
         await flushNewProductionRecords();
         renderWorkOrdersList(); renderDashboard(); updateStats();
         await updateIdealRatesFromActual();
@@ -2066,7 +2453,11 @@ function showDetails(id) {
 }
 function hideDetails() { document.getElementById('detailsView').classList.add('hidden'); }
 function hideProductionDetails() { document.getElementById('productionDetailsView').classList.add('hidden'); }
-function hideReportResults() { document.getElementById('reportResults').classList.add('hidden'); }
+function hideReportResults() {
+    document.getElementById('reportResults').classList.add('hidden');
+    const strip = document.getElementById('reportSummaryStrip');
+    if (strip) strip.innerHTML = '';
+}
 
 function showProductionDetails(id) {
     const rec = productionDB.find(r => r.id === id);
@@ -2220,7 +2611,8 @@ async function processWorkOrder() {
         if (items.length === 0) { hideLoading(); showToast('No valid data', 'error'); return; }
         const workOrder = {
             id: Date.now(), workOrderName: woName, projectName: projName, salesOrderNumber: soNum,
-            type, model, date: new Date().toLocaleDateString(), creationTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type, model, date: new Date().toLocaleDateString(),
+            creationTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             timestamp: Date.now(), items, fileName: document.getElementById('workOrderFile').files[0]?.name || "Unknown",
             archived: false
         };
@@ -2512,7 +2904,7 @@ async function recordProduction() {
                 showToast('تعذّر حفظ إكمال العمليات الأخرى تلقائيًا على الخادم.', 'error');
                 return;
             }
-            const msg = opIsFinish ? 'تم إكمال باقي العمليات تلقائياً لأن العملية من نوع finish' : 'تم إكمال العمليات الأخرى تلقائياً بواسطة Balance';
+            const msg = opIsFinish ? 'تم إكمال باقي العمليات تلقائياً' : 'تم إكمال العمليات الأخرى تلقائياً بواسطة Balance';
             showToast(msg, 'info');
         }
     }
@@ -2580,19 +2972,10 @@ function calculateDowntimeDuration() {
     if (end <= start) end.setDate(end.getDate() + 1);
     let durationMinutes = (end - start) / (1000 * 60);
     let breakStart, breakEnd;
-    if (shift === 'First Shift') {
-        breakStart = new Date(`2000-01-01T12:00:00`);
-        breakEnd = new Date(`2000-01-01T12:30:00`);
-    } else if (shift === 'Second Shift') {
-        breakStart = new Date(`2000-01-01T08:00:00`);
-        breakEnd = new Date(`2000-01-01T08:30:00`);
-    } else if (shift === 'Third Shift') {
-        breakStart = new Date(`2000-01-01T04:00:00`);
-        breakEnd = new Date(`2000-01-01T04:30:00`);
-    } else {
-        document.getElementById('downtimeDuration').value = Math.round(durationMinutes);
-        return;
-    }
+    if (shift === 'First Shift') { breakStart = new Date(`2000-01-01T12:00:00`); breakEnd = new Date(`2000-01-01T12:30:00`); }
+    else if (shift === 'Second Shift') { breakStart = new Date(`2000-01-01T08:00:00`); breakEnd = new Date(`2000-01-01T08:30:00`); }
+    else if (shift === 'Third Shift') { breakStart = new Date(`2000-01-01T04:00:00`); breakEnd = new Date(`2000-01-01T04:30:00`); }
+    else { document.getElementById('downtimeDuration').value = Math.round(durationMinutes); return; }
     let breakStartAdj = new Date(`2000-01-01T${breakStart.toTimeString().slice(0, 5)}`);
     let breakEndAdj = new Date(`2000-01-01T${breakEnd.toTimeString().slice(0, 5)}`);
     if (breakEndAdj <= breakStartAdj) breakEndAdj.setDate(breakEndAdj.getDate() + 1);
@@ -2606,7 +2989,6 @@ function calculateDowntimeDuration() {
     document.getElementById('downtimeDuration').value = durationMinutes;
 }
 
-// ✅ إظهار/إخفاء حقل اسم العامل بناءً على نوع العطل
 function onDowntimeTypeChange() {
     const type = document.getElementById('downtimeType').value;
     const workerGroup = document.getElementById('workerNameGroup');
@@ -2633,7 +3015,8 @@ async function recordDowntime() {
     const duration = parseInt(document.getElementById('downtimeDuration').value);
     const startTime = document.getElementById('downtimeStartTime').value;
     const endTime = document.getElementById('downtimeEndTime').value;
-    const workerName = document.getElementById('downtimeWorkerName').value.trim();
+    const workerInput = document.getElementById('downtimeWorkerName');
+    const workerName = workerInput ? workerInput.value.trim() : '';
 
     if (!date || !shift || !machine || !downtimeType || !description || !duration || !startTime || !endTime) {
         showToast('Please fill all fields including start and end time', 'warning');
@@ -2641,7 +3024,7 @@ async function recordDowntime() {
     }
     if (downtimeType === 'Worker' && !workerName) {
         showToast('Please enter the worker name', 'warning');
-        document.getElementById('downtimeWorkerName').focus();
+        if (workerInput) workerInput.focus();
         return;
     }
 
@@ -2681,15 +3064,10 @@ function renderDowntimeList() {
     if (records.length === 0) { container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No downtime records entered today.</p>'; return; }
     const canDelete = hasPermission('canDeleteDowntime');
     const typeLabels = {
-        'Machine': 'ماكينة (Machine)',
-        'Material': 'خامة (Material)',
-        'Worker': 'عامل (Worker)',
-        'Panel': 'لوحة (Panel)',
-        'Maintenance': 'Maintenance',
-        'Planning Load': 'Planning Load',
-        'Material Issue': 'Material Issue',
-        'Labor Shortage': 'Labor Shortage',
-        'Quality': 'Quality'
+        'Machine': 'ماكينة (Machine)', 'Material': 'خامة (Material)',
+        'Worker': 'عامل (Worker)', 'Panel': 'لوحة (Panel)',
+        'Maintenance': 'Maintenance', 'Planning Load': 'Planning Load',
+        'Material Issue': 'Material Issue', 'Labor Shortage': 'Labor Shortage', 'Quality': 'Quality'
     };
     container.innerHTML = records.map(r => {
         const typeLabel = typeLabels[r.downtimeType] || r.downtimeType;
@@ -2716,6 +3094,22 @@ async function populateNCRItems() {
     });
 }
 
+function onNCRCauseChange() {
+    const cause = document.getElementById('ncrCause').value;
+    const workerGroup = document.getElementById('ncrWorkerNameGroup');
+    const workerInput = document.getElementById('ncrWorkerName');
+    if (!workerGroup || !workerInput) return;
+    if (cause === 'Worker') {
+        workerGroup.classList.remove('hidden');
+        workerInput.required = true;
+        workerInput.focus();
+    } else {
+        workerGroup.classList.add('hidden');
+        workerInput.required = false;
+        workerInput.value = '';
+    }
+}
+
 async function recordNCR() {
     if (!hasPermission('canRecordNCR')) { showToast('غير مسموح لك بتسجيل NCR', 'error'); return; }
     const date = document.getElementById('ncrDate').value;
@@ -2726,26 +3120,52 @@ async function recordNCR() {
     const rejectedQty = parseInt(document.getElementById('ncrRejectedQty').value);
     const ncrType = document.getElementById('ncrType').value;
     const comment = document.getElementById('ncrComment').value;
+    const ncrCauseEl = document.getElementById('ncrCause');
+    const ncrCause = ncrCauseEl ? ncrCauseEl.value : '';
+    const workerInput = document.getElementById('ncrWorkerName');
+    const ncrWorkerName = workerInput ? workerInput.value.trim() : '';
+
     if (!date || !shift || !machine || !woId || itemIdx === '' || !rejectedQty || !ncrType) {
         showToast('Please fill all required fields', 'warning');
         return;
     }
+    if (!ncrCause) {
+        showToast('Please select NCR Cause', 'warning');
+        if (ncrCauseEl) ncrCauseEl.focus();
+        return;
+    }
+    if (ncrCause === 'Worker' && !ncrWorkerName) {
+        showToast('Please enter the worker name', 'warning');
+        if (workerInput) workerInput.focus();
+        return;
+    }
+
     const wo = workOrdersDB.find(w => w.id == woId);
     if (!wo) { showToast('Work order not found', 'error'); return; }
     const item = wo.items[itemIdx];
     if (!item) { showToast('Item not found', 'error'); return; }
+
     const newNCR = {
         id: Date.now(), date, shift, machine,
         workOrderId: parseInt(woId), workOrderName: wo.workOrderName,
         itemName: item.itemName, rejectedQty, ncrType, comment,
+        ncrCause: ncrCause,
+        ncrWorkerName: (ncrCause === 'Worker') ? ncrWorkerName : '',
         timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
     };
     ncrDB.push(newNCR);
     await saveToServer('ncrDB', ncrDB);
+
     document.getElementById('ncrForm').reset();
     document.getElementById('ncrDate').value = getLocalDateStr();
-    document.getElementById('ncrWorkOrderSearch').value = '';
-    document.getElementById('ncrItemSearch').value = '';
+    const woSearch = document.getElementById('ncrWorkOrderSearch');
+    const itemSearch = document.getElementById('ncrItemSearch');
+    if (woSearch) woSearch.value = '';
+    if (itemSearch) itemSearch.value = '';
+    const workerGroup = document.getElementById('ncrWorkerNameGroup');
+    if (workerGroup) workerGroup.classList.add('hidden');
+    if (workerInput) { workerInput.value = ''; workerInput.required = false; }
+
     document.getElementById('ncrWorkOrder').innerHTML = '<option value="" disabled selected>Select work order...</option>';
     document.getElementById('ncrItem').innerHTML = '<option value="" disabled selected>Select item...</option>';
     populateNCRWorkOrders();
@@ -2768,6 +3188,8 @@ function renderNCRList() {
         records = records.filter(r =>
             (r.itemName || '').toLowerCase().includes(search) ||
             (r.ncrType || '').toLowerCase().includes(search) ||
+            (r.ncrCause || '').toLowerCase().includes(search) ||
+            (r.ncrWorkerName || '').toLowerCase().includes(search) ||
             (r.comment || '').toLowerCase().includes(search) ||
             (r.workOrderName || '').toLowerCase().includes(search)
         );
@@ -2775,7 +3197,32 @@ function renderNCRList() {
     records.sort((a, b) => b.timestamp - a.timestamp);
     if (records.length === 0) { container.innerHTML = '<p class="text-center text-gray-500 col-span-2 py-10">No NCR records this month.</p>'; return; }
     const canDelete = hasPermission('canDeleteNCR');
-    container.innerHTML = records.map(r => `<div class="card"><div class="p-4"><div class="flex justify-between items-start"><div><h4 class="font-bold">${esc(r.itemName)}</h4><div class="flex gap-2 mt-2 flex-wrap"><span class="badge badge-danger">${esc(r.ncrType)}</span><span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift)}</span></div><p class="text-xs text-gray-500 mt-2"><i class="fa-solid fa-file-contract mr-1"></i> ${esc(r.workOrderName)}</p></div><div class="text-right"><span class="block font-bold text-red-600">${r.rejectedQty} pcs</span><span class="block text-xs text-gray-500">${esc(r.machine)}</span></div></div>${r.comment ? `<p class="text-sm text-gray-600 mt-3">${esc(r.comment)}</p>` : ''}${canDelete ? `<div class="flex justify-end mt-2"><button onclick="showDeleteNCRConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}</div></div>`).join('');
+
+    const causeLabels = {
+        'Worker': 'عامل (Worker)',
+        'Machine': 'ماكينة (Machine)',
+        'Drawing': 'الرسم الهندسي (Workshop Drawing)',
+        'Material': 'خامة (Material)'
+    };
+    const causeColors = {
+        'Worker': 'bg-blue-100 text-blue-800',
+        'Machine': 'bg-red-100 text-red-800',
+        'Drawing': 'bg-purple-100 text-purple-800',
+        'Material': 'bg-yellow-100 text-yellow-800'
+    };
+
+    container.innerHTML = records.map(r => {
+        const causeLabel = r.ncrCause ? (causeLabels[r.ncrCause] || r.ncrCause) : null;
+        const causeClass = r.ncrCause ? (causeColors[r.ncrCause] || 'bg-gray-100 text-gray-800') : 'bg-gray-100 text-gray-800';
+        const causeLine = causeLabel
+            ? `<span class="px-2 py-1 text-xs rounded-full ${causeClass} font-bold">${causeLabel}</span>`
+            : '';
+        const workerLine = (r.ncrCause === 'Worker' && r.ncrWorkerName)
+            ? `<p class="text-sm text-blue-700 mt-2"><i class="fa-solid fa-user mr-1"></i> ${esc(r.ncrWorkerName)}</p>`
+            : '';
+
+        return `<div class="card"><div class="p-4"><div class="flex justify-between items-start"><div><h4 class="font-bold">${esc(r.itemName)}</h4><div class="flex gap-2 mt-2 flex-wrap"><span class="badge badge-danger">${esc(r.ncrType)}</span>${causeLine}<span class="badge badge-success text-xs">${esc(r.date)} - ${esc(r.shift)}</span></div><p class="text-xs text-gray-500 mt-2"><i class="fa-solid fa-file-contract mr-1"></i> ${esc(r.workOrderName)}</p></div><div class="text-right"><span class="block font-bold text-red-600">${r.rejectedQty} pcs</span><span class="block text-xs text-gray-500">${esc(r.machine)}</span></div></div>${workerLine}${r.comment ? `<p class="text-sm text-gray-600 mt-3">${esc(r.comment)}</p>` : ''}${canDelete ? `<div class="flex justify-end mt-2"><button onclick="showDeleteNCRConfirmation(${r.id})" class="delete-btn text-red-500 hover:text-red-700 text-sm"><i class="fa-solid fa-trash"></i></button></div>` : ''}</div></div>`;
+    }).join('');
 }
 
 // ====== HR Functions ======
@@ -2996,7 +3443,6 @@ async function clearProductionForm() {
 // ====== OEE/TEEP ======
 function calculateActualIdealRates() {
     const shiftMinutes = 480;
-    const rates = {};
     const prodMap = new Map();
     productionDB.forEach(rec => {
         const key = `${rec.machine}_${rec.shift}_${rec.date}`;
@@ -3174,16 +3620,62 @@ function selectReportType(type) {
     }
     const container = document.getElementById('reportFormsContainer');
     if (!container) return;
+    const summaryStrip = document.getElementById('reportSummaryStrip');
+    if (summaryStrip) summaryStrip.innerHTML = '';
     let html = '';
     switch (type) {
+        case 'salesOrderTree':
+            html = `<div class="card p-4">
+                <h3 class="text-lg font-bold mb-4"><i class="fa-solid fa-sitemap mr-2 text-emerald-600"></i> ${soTreeT('soFamilyTree', 'Sales Order Family Tree')}</h3>
+                <p class="text-sm text-gray-500 mb-3">${soTreeT('soFamilyTreeDesc', 'Hierarchical tree for each Sales Order with its Work Orders, status and delay alerts')}</p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="input-group">
+                        <label class="input-label">${soTreeT('treeSalesOrderFilter', 'Sales Order')}</label>
+                        <select id="treeSalesOrderFilter" class="input-field" onchange="generateSalesOrderTree()">
+                            <option value="">${soTreeT('allSalesOrders', 'All Sales Orders')}</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">${soTreeT('treeStatusFilter', 'Status')}</label>
+                        <select id="treeStatusFilter" class="input-field" onchange="generateSalesOrderTree()">
+                            <option value="all">${soTreeT('treeStatusAll', 'All')}</option>
+                            <option value="inprogress">${soTreeT('treeStatusInProgress', 'In Progress Only')}</option>
+                            <option value="finished">${soTreeT('treeStatusFinished', 'Finished Only')}</option>
+                            <option value="delayed">${soTreeT('treeStatusDelayed', 'Delayed Only')}</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">${soTreeT('treeViewStyle', 'View Style')}</label>
+                        <select id="treeViewStyle" class="input-field" onchange="generateSalesOrderTree()">
+                            <option value="detail">${soTreeT('treeDetailView', 'Detailed Tree (collapsible)')}</option>
+                            <option value="summary">${soTreeT('treeSummaryView', 'Summary (one row per Sales Order)')}</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">${soTreeT('treeDelayDays', 'Delay Threshold (days)')}</label>
+                        <input type="number" id="treeDelayDays" class="input-field" min="1" step="1" value="30" onchange="generateSalesOrderTree()">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">${soTreeT('treeDelayBasis', 'Delay Basis')}</label>
+                        <select id="treeDelayBasis" class="input-field" onchange="generateSalesOrderTree()">
+                            <option value="age">${soTreeT('treeBasisAge', 'Days since work order creation')}</option>
+                            <option value="idle">${soTreeT('treeBasisIdle', 'Days without production activity')}</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="generateSalesOrderTree()" class="btn btn-primary mt-2">
+                    <i class="fa-solid fa-sitemap"></i> ${soTreeT('generateFamilyTree', 'Generate Family Tree')}
+                </button>
+            </div>`;
+            break;
         case 'itemsStatus':
-            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${translations[currentLanguage].itemsStatusReport || 'Items Status Report'}</h3><p class="text-sm text-gray-500 mb-3">${translations[currentLanguage].detailedStatus || 'Get detailed status of items in a specific work order'}</p><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">${translations[currentLanguage].selectWorkOrder || 'Select Work Order'}</label><select id="reportWorkOrder" class="input-field"></select></div><div class="input-group"><label class="input-label">Search Work Order Number</label><input type="text" id="reportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterWorkOrderSelect()"></div></div><button onclick="generateItemsStatusReport()" class="btn btn-primary mt-4">${translations[currentLanguage].generateItemsStatus || 'Generate Items Status Report'}</button></div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${translations[currentLanguage].itemsStatusReport || 'Items Status Report'}</h3><p class="text-sm text-gray-500 mb-3">${translations[currentLanguage].detailedStatus || 'Get detailed status of items'}</p><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">${translations[currentLanguage].selectWorkOrder || 'Select Work Order'}</label><select id="reportWorkOrder" class="input-field"></select></div><div class="input-group"><label class="input-label">Search Work Order Number</label><input type="text" id="reportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterWorkOrderSelect()"></div></div><button onclick="generateItemsStatusReport()" class="btn btn-primary mt-4">${translations[currentLanguage].generateItemsStatus || 'Generate Items Status Report'}</button></div>`;
             break;
         case 'detailedItem':
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Detailed Item Report</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">Select Work Order</label><select id="detailReportWorkOrder" class="input-field" onchange="populateItemsForReport()"></select></div><div class="input-group"><label class="input-label">Search Work Order</label><input type="text" id="detailReportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterDetailWorkOrderSelect()"></div></div><div id="itemSelectionContainer" class="hidden"><div class="input-group mt-4"><label class="input-label">Search Item</label><input type="text" id="detailItemSearchInput" class="input-field" onkeyup="filterItemsForReport()" placeholder="Search item..."></div><div class="input-group"><label class="input-label">Select Item</label><select id="detailReportItem" class="input-field"></select></div></div><button onclick="generateDetailedItemReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
             break;
         case 'dailyProduction':
-            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Daily Production Report</h3><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="fromDate">From Date</label><input type="date" id="dailyReportFromDate" class="input-field"></div><div class="input-group"><label class="input-label" data-i18n="toDate">To Date</label><input type="date" id="dailyReportToDate" class="input-field"></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="operationPhase">Operation Phase</label><select id="dailyReportPhase" class="input-field" onchange="updateDailyReportMachines()"><option value="">All Phases</option><option value="minimum">Minimum</option><option value="crop">Cropping</option><option value="shear">Shearing</option><option value="bend">Bending</option><option value="drill">Drilling</option><option value="chamfer">Chamfering</option><option value="finish">Finishing</option></select></div><div class="input-group"><label class="input-label" data-i18n="shift">Shift</label><select id="dailyReportShift" class="input-field"><option value="">All Shifts</option><option value="First Shift">First Shift</option><option value="Second Shift">Second Shift</option><option value="Third Shift">Third Shift</option></select></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="machineName">Machine Name</label><select id="dailyReportMachine" class="input-field"><option value="">All Machines</option></select></div><div class="input-group"><label class="input-label" data-i18n="workOrderName">Work Order</label><select id="dailyReportWorkOrder" class="input-field"><option value="">All Work Orders</option></select></div></div><button onclick="generateDailyProductionReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Daily Production Report</h3><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="fromDate">From Date</label><input type="date" id="dailyReportFromDate" class="input-field"></div><div class="input-group"><label class="input-label" data-i18n="toDate">To Date</label><input type="date" id="dailyReportToDate" class="input-field"></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">Operation Phase</label><select id="dailyReportPhase" class="input-field" onchange="updateDailyReportMachines()"><option value="">All Phases</option><option value="minimum">Minimum</option><option value="crop">Cropping</option><option value="shear">Shearing</option><option value="bend">Bending</option><option value="drill">Drilling</option><option value="chamfer">Chamfering</option><option value="finish">Finishing</option></select></div><div class="input-group"><label class="input-label">Shift</label><select id="dailyReportShift" class="input-field"><option value="">All Shifts</option><option value="First Shift">First Shift</option><option value="Second Shift">Second Shift</option><option value="Third Shift">Third Shift</option></select></div></div><div class="grid grid-cols-2 gap-4"><div class="input-group"><label class="input-label">Machine Name</label><select id="dailyReportMachine" class="input-field"><option value="">All Machines</option></select></div><div class="input-group"><label class="input-label">Work Order</label><select id="dailyReportWorkOrder" class="input-field"><option value="">All Work Orders</option></select></div></div><button onclick="generateDailyProductionReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
             break;
         case 'operationStatus':
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Operation Status Report</h3><div class="input-group"><label class="input-label">Sales Order</label><select id="operationSalesOrder" class="input-field" onchange="populateWorkOrdersForOperation()"><option value="">All Sales Orders</option></select></div><div class="input-group"><label class="input-label">Operation Phase</label><select id="operationPhase" class="input-field" onchange="populateWorkOrdersForOperation()"><option value="">All Phases</option><option value="minimum">Minimum</option><option value="crop">Cropping</option><option value="shear">Shearing</option><option value="bend">Bending</option><option value="drill">Drilling</option><option value="chamfer">Chamfering</option><option value="finish">Finishing</option></select></div><div class="input-group"><label class="input-label">Work Order</label><select id="operationWorkOrder" class="input-field"><option value="">All Work Orders</option></select></div><div class="input-group"><label class="input-label">Status Filter</label><select id="operationStatusFilter" class="input-field"><option value="All">All</option><option value="Done">Done</option><option value="In Progress">In Progress</option><option value="Ready">Ready</option><option value="Pending">Pending</option></select></div><div id="machineCategoryContainer"><div class="input-group"><label class="input-label">Machine Category</label><select id="operationMachineCategory" class="input-field"><option value="all">All</option><option value="angles">Angles</option><option value="plates">Plates</option></select></div></div><button onclick="generateOperationStatusReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
@@ -3207,15 +3699,31 @@ function selectReportType(type) {
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${(translations[currentLanguage].stageSummaryReport) || 'Project Stage Summary'}</h3><div class="input-group"><label class="input-label">${(translations[currentLanguage].selectSalesOrder) || 'Select Sales Order'}</label><select id="stageSummarySO" class="input-field" onchange="generateProjectStageSummary()"><option value="">${(translations[currentLanguage].allSalesOrders) || 'All Sales Orders'}</option></select></div><button onclick="generateProjectStageSummary()" class="btn btn-primary mt-4"><i class="fa-solid fa-layer-group mr-2"></i>${(translations[currentLanguage].generateStageSummary) || 'Generate Stage Summary'}</button></div>`;
             break;
         case 'minimumStoppage':
-            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${(translations[currentLanguage].minStoppageReport) || 'Stopped After Minimum'}</h3><p class="text-sm text-gray-500 mb-3">${(translations[currentLanguage].minStoppageDesc) || 'Items that completed Minimum but are pending in later stages'}</p><div class="input-group"><label class="input-label">${(translations[currentLanguage].selectSalesOrder) || 'Select Sales Order'}</label><select id="minStopSO" class="input-field" onchange="generateMinimumStoppageReport()"><option value="">${(translations[currentLanguage].allSalesOrders) || 'All Sales Orders'}</option></select></div><div class="input-group"><label class="input-label">Category</label><select id="minStopCategory" class="input-field" onchange="generateMinimumStoppageReport()"><option value="all">All</option><option value="angles">Angles</option><option value="plates">Plates</option></select></div><button onclick="generateMinimumStoppageReport()" class="btn btn-primary mt-4"><i class="fa-solid fa-circle-stop mr-2"></i>${(translations[currentLanguage].generateReport) || 'Generate Report'}</button></div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${(translations[currentLanguage].minStoppageReport) || 'Stopped After Minimum'}</h3><p class="text-sm text-gray-500 mb-3">${(translations[currentLanguage].minStoppageDesc) || 'Items that completed Minimum'}</p><div class="input-group"><label class="input-label">${(translations[currentLanguage].selectSalesOrder) || 'Select Sales Order'}</label><select id="minStopSO" class="input-field" onchange="generateMinimumStoppageReport()"><option value="">${(translations[currentLanguage].allSalesOrders) || 'All Sales Orders'}</option></select></div><div class="input-group"><label class="input-label">Category</label><select id="minStopCategory" class="input-field" onchange="generateMinimumStoppageReport()"><option value="all">All</option><option value="angles">Angles</option><option value="plates">Plates</option></select></div><button onclick="generateMinimumStoppageReport()" class="btn btn-primary mt-4"><i class="fa-solid fa-circle-stop mr-2"></i>${(translations[currentLanguage].generateReport) || 'Generate Report'}</button></div>`;
             break;
         case 'monthlyProduction':
-            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${translations[currentLanguage].monthlyProductionReport || 'Monthly Production Report'}</h3><p class="text-sm text-gray-500 mb-4">${translations[currentLanguage].monthlyReportDesc || 'Daily Minimum & Finish vs target (22 tons), with cumulative efficiency'}</p><div class="flex items-center gap-4"><label class="text-sm font-medium">${translations[currentLanguage].month || 'Month'}:</label><input type="month" id="monthlyReportMonth" class="input-field w-48" value="${new Date().toISOString().slice(0, 7)}" /><button onclick="generateMonthlyProductionReport()" class="btn btn-primary"><i class="fa-solid fa-file-alt"></i> ${translations[currentLanguage].generateMonthlyReport || 'Generate Monthly Report'}</button></div></div>`;
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${translations[currentLanguage].monthlyProductionReport || 'Monthly Production Report'}</h3><p class="text-sm text-gray-500 mb-4">${translations[currentLanguage].monthlyReportDesc || 'Daily Minimum & Finish vs target'}</p><div class="flex items-center gap-4"><label class="text-sm font-medium">${translations[currentLanguage].month || 'Month'}:</label><input type="month" id="monthlyReportMonth" class="input-field w-48" value="${new Date().toISOString().slice(0, 7)}" /><button onclick="generateMonthlyProductionReport()" class="btn btn-primary"><i class="fa-solid fa-file-alt"></i> ${translations[currentLanguage].generateMonthlyReport || 'Generate Monthly Report'}</button></div></div>`;
             break;
         default: return;
     }
     container.innerHTML = html;
     container.classList.remove('hidden');
+    if (type === 'salesOrderTree') {
+        const soSel = document.getElementById('treeSalesOrderFilter');
+        if (soSel) {
+            const sos = getDistinctSalesOrders();
+            soSel.innerHTML = `<option value="">${soTreeT('allSalesOrders', 'All Sales Orders')}</option>`;
+            sos.forEach(so => { soSel.innerHTML += `<option value="${esc(so)}">${esc(so)}</option>`; });
+        }
+        const treeSaved = soTreeLoadSettings();
+        const treeDaysEl = document.getElementById('treeDelayDays');
+        const treeBasisEl = document.getElementById('treeDelayBasis');
+        if (treeDaysEl) treeDaysEl.value = treeSaved.days;
+        if (treeBasisEl) treeBasisEl.value = treeSaved.basis;
+        soTreeState.search = '';
+        soTreeState.sort = 'so';
+        generateSalesOrderTree();
+    }
     if (type === 'ncrReport') { document.getElementById('ncrReportFromDate').value = getLocalDateStr(); document.getElementById('ncrReportToDate').value = getLocalDateStr(); }
     if (type === 'oeeReport') { document.getElementById('oeeReportFromDate').value = getLocalDateStr(); document.getElementById('oeeReportToDate').value = getLocalDateStr(); }
     if (type === 'teepReport') { document.getElementById('teepReportFromDate').value = getLocalDateStr(); document.getElementById('teepReportToDate').value = getLocalDateStr(); }
@@ -3294,9 +3802,7 @@ async function generateItemsStatusReport() {
             const existing = completionMap.get(key);
             if (!existing || rec.date > existing) completionMap.set(key, rec.date);
         }
-        let titleSuffix = '';
-        if (woValue === 'all' || !woValue) titleSuffix = 'All Work Orders';
-        else titleSuffix = selectedWOs[0].workOrderName;
+        let titleSuffix = (!woValue || woValue === 'all') ? 'All Work Orders' : selectedWOs[0].workOrderName;
         document.getElementById('reportTitle').textContent = `Items Status Report - ${titleSuffix}`;
         const header = document.getElementById('reportTableHeader');
         const body = document.getElementById('reportTableBody');
@@ -3458,10 +3964,7 @@ async function generateOperationStatusReport() {
                     if (machineCat === 'angles') { const section = it.section.toString().trim().toUpperCase(); if (!section.startsWith('L')) catMatch = false; }
                     else if (machineCat === 'plates') { const section = it.section.toString().trim().toUpperCase(); if (!(section.startsWith('P') || section.startsWith('F'))) catMatch = false; }
                     if (phaseMatch && catMatch) {
-                        let status = '';
-                        if (isComp) status = 'Done';
-                        else if (compQty > 0) status = 'In Progress';
-                        else status = prevOk ? 'Ready' : 'Pending';
+                        let status = isComp ? 'Done' : (compQty > 0 ? 'In Progress' : (prevOk ? 'Ready' : 'Pending'));
                         if (statusFilter === 'All' || status === statusFilter) {
                             const weight = it.totalWeight || (it.weightPerPiece * it.quantity) || 0;
                             items.push({ woName: wo.workOrderName, salesOrder: wo.salesOrderNumber, proj: wo.projectName, itemName: it.itemName, section: it.section, opName: op.name, machine: op.machine, required: it.quantity, weight: weight, completed: compQty, remaining: it.quantity - compQty, status: status });
@@ -3549,10 +4052,12 @@ function generateDowntimeReport() {
     else {
         let totalDur = 0;
         const rows = [];
+        const typeLabels = { 'Machine': 'ماكينة (Machine)', 'Material': 'خامة (Material)', 'Worker': 'عامل (Worker)', 'Panel': 'لوحة (Panel)' };
         filtered.forEach((r, idx) => {
             totalDur += r.durationMinutes;
             const worker = (r.downtimeType === 'Worker' && r.workerName) ? esc(r.workerName) : '-';
-            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${r.date}</td><td class="text-center">${r.shift || '-'}</td><td class="text-center">${r.machine}</td><td class="text-center">${r.downtimeType}</td><td class="text-center font-bold text-blue-700">${worker}</td><td class="text-center">${r.description || '-'}</td><td class="font-bold text-red-600">${r.durationMinutes}</td></tr>`);
+            const typeLabel = typeLabels[r.downtimeType] || r.downtimeType;
+            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${r.date}</td><td class="text-center">${r.shift || '-'}</td><td class="text-center">${r.machine}</td><td class="text-center">${typeLabel}</td><td class="text-center font-bold text-blue-700">${worker}</td><td class="text-center">${r.description || '-'}</td><td class="font-bold text-red-600">${r.durationMinutes}</td></tr>`);
         });
         rows.push(`<tr class="total-row"><td colspan="7" class="font-bold text-right">Total Downtime:</td><td class="font-bold text-red-600">${totalDur} minutes (${(totalDur / 60).toFixed(2)} hours)</td></tr>`);
         body.innerHTML = rows.join('');
@@ -3590,16 +4095,24 @@ function generateNCRReport() {
     document.getElementById('reportTitle').textContent = `NCR Report (${fromDate} to ${toDate})`;
     const header = document.getElementById('reportTableHeader');
     const body = document.getElementById('reportTableBody');
-    header.innerHTML = `<tr><th>#</th><th>Date</th><th>Shift</th><th>Machine</th><th>Work Order</th><th>Item Name</th><th>Rejected Qty</th><th>NCR Type</th><th>Comment</th></tr>`;
-    if (filtered.length === 0) body.innerHTML = '<tr><td colspan="9" class="text-center py-4">No NCR records found</td></tr>';
+    header.innerHTML = `<tr><th>#</th><th>Date</th><th>Shift</th><th>Machine</th><th>Work Order</th><th>Item Name</th><th>Rejected Qty</th><th>NCR Type</th><th>NCR Cause</th><th>Worker Name</th><th>Comment</th></tr>`;
+    if (filtered.length === 0) body.innerHTML = '<tr><td colspan="11" class="text-center py-4">No NCR records found</td></tr>';
     else {
         let totalRejected = 0;
         const rows = [];
+        const causeLabels = {
+            'Worker': 'عامل (Worker)',
+            'Machine': 'ماكينة (Machine)',
+            'Drawing': 'الرسم الهندسي (Workshop Drawing)',
+            'Material': 'خامة (Material)'
+        };
         filtered.forEach((rec, idx) => {
             totalRejected += rec.rejectedQty;
-            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${rec.date}</td><td class="text-center">${rec.shift}</td><td class="text-center">${rec.machine}</td><td class="text-center">${rec.workOrderName}</td><td class="text-center">${rec.itemName}</td><td class="text-center font-bold text-red-600">${rec.rejectedQty}</td><td class="text-center"><span class="badge ${rec.ncrType === 'Scrap' ? 'badge-danger' : (rec.ncrType === 'Accept as it is' ? 'badge-warning' : 'badge-info')}">${rec.ncrType}</span></td><td class="text-center">${rec.comment || '-'}</td></tr>`);
+            const causeLabel = rec.ncrCause ? (causeLabels[rec.ncrCause] || rec.ncrCause) : '-';
+            const workerName = (rec.ncrCause === 'Worker' && rec.ncrWorkerName) ? rec.ncrWorkerName : '-';
+            rows.push(`<tr><td class="text-center">${idx + 1}</td><td class="text-center">${rec.date}</td><td class="text-center">${rec.shift}</td><td class="text-center">${rec.machine}</td><td class="text-center">${rec.workOrderName}</td><td class="text-center">${rec.itemName}</td><td class="text-center font-bold text-red-600">${rec.rejectedQty}</td><td class="text-center"><span class="badge ${rec.ncrType === 'Scrap' ? 'badge-danger' : (rec.ncrType === 'Accept as it is' ? 'badge-warning' : 'badge-info')}">${rec.ncrType}</span></td><td class="text-center font-bold">${causeLabel}</td><td class="text-center text-blue-700">${workerName}</td><td class="text-center">${rec.comment || '-'}</td></tr>`);
         });
-        rows.push(`<tr class="total-row"><td colspan="6" class="font-bold text-right">Total Rejected:</td><td class="font-bold text-red-600">${totalRejected}</td><td colspan="2"></td></tr>`);
+        rows.push(`<tr class="total-row"><td colspan="6" class="font-bold text-right">Total Rejected:</td><td class="font-bold text-red-600">${totalRejected}</td><td colspan="4"></td></tr>`);
         body.innerHTML = rows.join('');
     }
     document.getElementById('reportResults').classList.remove('hidden');
@@ -3745,7 +4258,7 @@ async function generateMinimumStoppageReport() {
         const header = document.getElementById('reportTableHeader');
         const body = document.getElementById('reportTableBody');
         header.innerHTML = `<tr><th>#</th><th>Sales Order</th><th>Work Order</th><th>Item Name</th><th>Section</th><th>Category</th><th>Quantity</th><th>Weight (kg)</th><th>Stopped At Stage</th><th>Machine</th><th>Stage Progress</th></tr>`;
-        if (rows.length === 0) body.innerHTML = '<tr><td colspan="11" class="text-center py-4">No items found — no items have completed Minimum while still pending a later stage.</td></tr>';
+        if (rows.length === 0) body.innerHTML = '<tr><td colspan="11" class="text-center py-4">No items found</td></tr>';
         else {
             const fmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
             const out = rows.map((r, i) => `<tr><td class="text-center">${i + 1}</td><td class="text-center">${esc(r.salesOrder)}</td><td class="text-center">${esc(r.woName)}</td><td class="font-bold">${esc(r.itemName)}</td><td class="text-center">${esc(r.section)}</td><td class="text-center"><span class="badge ${r.category === 'Angle' ? 'badge-primary' : (r.category === 'Plate' ? 'badge-warning' : 'badge-secondary')}">${esc(r.category)}</span></td><td class="text-center">${fmtInt(r.qty)}</td><td class="text-center">${fmtInt(r.wt)}</td><td class="text-center"><span class="status-indicator status-in-progress">${esc(r.stage)}</span></td><td class="text-center">${esc(r.machine)}</td><td class="text-center">${fmtInt(r.stuckDone)} / ${fmtInt(r.qty)}</td></tr>`);
@@ -3852,7 +4365,7 @@ function exportReportToPdf() {
     const rows = Array.from(document.querySelectorAll('#reportTableBody tr')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()));
     if (headers.length === 0 || rows.length === 0) { showToast('No report to export', 'warning'); return; }
     const jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : (window.jsPDF || null);
-    if (!jsPDFCtor) { showToast('PDF library not loaded — opening print dialog (choose "Save as PDF")', 'warning'); printReport(); return; }
+    if (!jsPDFCtor) { showToast('PDF library not loaded', 'warning'); printReport(); return; }
     try {
         const doc = new jsPDFCtor({ orientation: 'landscape', unit: 'pt', format: 'a4' });
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -3965,6 +4478,10 @@ function switchTab(tab) {
         const itemSearch = document.getElementById('ncrItemSearch');
         if (woSearch) woSearch.value = '';
         if (itemSearch) itemSearch.value = '';
+        const ncrWorkerGroup = document.getElementById('ncrWorkerNameGroup');
+        const ncrWorkerInput = document.getElementById('ncrWorkerName');
+        if (ncrWorkerGroup) ncrWorkerGroup.classList.add('hidden');
+        if (ncrWorkerInput) { ncrWorkerInput.value = ''; ncrWorkerInput.required = false; }
         populateNCRWorkOrders();
         renderNCRList();
     }
@@ -4080,7 +4597,10 @@ function showDeleteNCRConfirmation(id) {
     const t = translations[currentLanguage];
     const rec = ncrDB.find(r => r.id === id);
     if (!rec) return;
-    showConfirmationDialog(t.deleteRecord, `${t.areYouSureDeleteNCR}<br><br><strong>${rec.itemName}</strong><br>${rec.ncrType} - ${rec.rejectedQty} pcs<br>${rec.date} - ${rec.shift}`, deleteNCRRecord, id);
+    const causeLabels = { 'Worker': 'عامل', 'Machine': 'ماكينة', 'Drawing': 'الرسم الهندسي', 'Material': 'خامة' };
+    const causeInfo = rec.ncrCause ? `<br>السبب: ${causeLabels[rec.ncrCause] || rec.ncrCause}` : '';
+    const workerInfo = (rec.ncrCause === 'Worker' && rec.ncrWorkerName) ? `<br>اسم العامل: ${esc(rec.ncrWorkerName)}` : '';
+    showConfirmationDialog(t.deleteRecord, `${t.areYouSureDeleteNCR}<br><br><strong>${esc(rec.itemName)}</strong><br>${esc(rec.ncrType)} - ${rec.rejectedQty} pcs${causeInfo}${workerInfo}<br>${rec.date} - ${rec.shift}`, deleteNCRRecord, id);
 }
 
 async function deleteProductionRecord(id) {
@@ -4103,10 +4623,7 @@ async function deleteProductionRecord(id) {
                 recalcItemStatus(it);
                 workOrdersDB[woIdx] = wo;
                 const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
-                if (!woSaveResult || !woSaveResult.success) {
-                    showToast('تعذّر تحديث أمر الشغل على الخادم.', 'error');
-                    return;
-                }
+                if (!woSaveResult || !woSaveResult.success) { showToast('تعذّر تحديث أمر الشغل على الخادم.', 'error'); return; }
             }
         }
     }

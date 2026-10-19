@@ -310,6 +310,14 @@
         .btn-convert-archived:hover { transform: scale(1.02) !important; box-shadow: 0 6px 25px rgba(245, 158, 11, 0.5) !important; }
         .btn-convert-archived i { font-size: 1.25rem !important; }
 
+        /* Entry panels (v2.3.1) — input forms are hidden until the user presses the "New" button */
+        .entry-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+        .entry-chip { background: #f1f5f9; border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.78rem; color: #475569; white-space: nowrap; }
+        .entry-chip b { font-size: 1rem; font-weight: 800; margin-right: 2px; }
+        .entry-toggle-btn.open { background: #fff; color: #374151; border: 2px solid #d1d5db; }
+        .entry-toggle-btn.open:hover { background: #f9fafb; border-color: #9ca3af; }
+        .entry-panel { animation: fadeIn 0.25s ease-out; border-bottom: 2px solid #f3f4f6; }
+
         /* Family Tree Styles (v2.3.0 — collapsible tree table + delay alerts) */
         .so-row { background: #e0f2fe; border-top: 3px solid #0369a1; cursor: pointer; transition: background 0.15s ease; }
         .so-row:hover { background: #bae6fd; }
@@ -648,9 +656,9 @@
         <section id="modelsSection" class="space-y-6 hidden">
             <div class="card">
                 <div class="card-header">
-                    <h2 class="text-xl font-bold"><i class="fa-solid fa-database mr-2 text-blue-600"></i> <span data-i18n="modelsDatabase">Models Database</span></h2>
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-database mr-2 text-blue-600"></i> <span data-i18n="modelsDatabase">Models Database</span></h2><div class="entry-actions"><span class="entry-chip"><b id="totalModels" class="text-blue-600">0</b> <span data-i18n="models">Models</span></span><span class="entry-chip"><b id="totalItems" class="text-purple-600">0</b> <span data-i18n="items">Items</span></span><button type="button" id="modelsNewBtn" class="btn btn-primary btn-sm entry-toggle-btn" onclick="toggleEntryPanel('models')" aria-expanded="false"><i class="fa-solid fa-plus entry-icon"></i> <span class="entry-lbl-new" data-i18n="newModelBtn">New Model</span><span class="entry-lbl-close hidden" data-i18n="close">Close</span></button></div>
                 </div>
-                <div class="card-body">
+                <div id="modelsEntryPanel" class="card-body hidden entry-panel">
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="lg:col-span-2">
                             <form id="uploadForm" class="space-y-4">
@@ -680,7 +688,7 @@
                                     </div>
                                     <div id="fileName" class="text-sm text-green-600 mt-2 hidden"></div>
                                 </div>
-                                <button type="button" onclick="processData()" class="btn btn-primary w-full"><i class="fa-solid fa-upload"></i> <span data-i18n="processSaveData">Process & Save Data</span></button>
+                                <div class="flex gap-2"><button type="button" onclick="processData()" class="btn btn-primary flex-1"><i class="fa-solid fa-upload"></i> <span data-i18n="processSaveData">Process & Save Data</span></button><button type="button" class="btn btn-outline" onclick="closeEntryPanel('models')"><i class="fa-solid fa-xmark"></i> <span data-i18n="cancel">Cancel</span></button></div>
                             </form>
                         </div>
                         <div class="space-y-4">
@@ -695,15 +703,7 @@
                                     </ul>
                                 </div>
                             </div>
-                            <div class="card">
-                                <div class="card-body">
-                                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-bar mr-2"></i> <span data-i18n="statistics">Statistics</span></h3>
-                                    <div class="grid grid-cols-2 gap-4">
-                                        <div class="text-center"><span id="totalModels" class="block text-2xl font-bold text-blue-600">0</span><span class="text-xs text-gray-500" data-i18n="models">Models</span></div>
-                                        <div class="text-center"><span id="totalItems" class="block text-2xl font-bold text-purple-600">0</span><span class="text-xs text-gray-500" data-i18n="items">Items</span></div>
-                                    </div>
-                                </div>
-                            </div>
+                            
                         </div>
                     </div>
                 </div>
@@ -726,8 +726,8 @@
         <!-- WORK ORDER SECTION -->
         <section id="workOrderSection" class="space-y-6 hidden">
             <div class="card">
-                <div class="card-header"><h2 class="text-xl font-bold"><i class="fa-solid fa-file-circle-plus mr-2 text-green-600"></i> <span data-i18n="createNewWorkOrder">Create New Work Order</span></h2></div>
-                <div class="card-body"><div class="grid grid-cols-1 lg:grid-cols-3 gap-6"><div class="lg:col-span-2"><form id="workOrderForm" class="space-y-4"><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="workOrderName">Work Order Name</label><input type="text" id="workOrderName" class="input-field" required data-i18n-placeholder="workOrderName" placeholder="Example: WO-2024-001"></div><div class="input-group"><label class="input-label" data-i18n="projectName">Project Name</label><input type="text" id="projectName" class="input-field" required data-i18n-placeholder="projectName" placeholder="Example: Northern Network Project"></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="salesOrderNumber">Sales Order Number</label><input type="text" id="salesOrderNumber" class="input-field" required data-i18n-placeholder="salesOrderNumber" placeholder="Example: SO-2024-1001"></div><div class="input-group"><label class="input-label" data-i18n="towerType">Tower Type</label><select id="workOrderTowerType" class="input-field" onchange="populateModelDropdown()" required><option value="" disabled selected data-i18n="selectType">Select type...</option></select></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="modelName">Model</label><select id="workOrderModel" class="input-field" required><option value="" disabled selected data-i18n="selectModel">Select model...</option></select></div><div class="input-group"><label class="input-label" data-i18n="uploadWorkOrderFile">Upload Work Order File</label><div class="backup-card p-4 rounded-lg text-center cursor-pointer" onclick="document.getElementById('workOrderFile').click()"><i class="fa-solid fa-cloud-arrow-up text-3xl text-green-400 mb-2"></i><p class="text-sm font-medium text-gray-700" data-i18n="clickToUpload">Click to upload or drag & drop</p><input type="file" id="workOrderFile" accept=".xlsx,.xls" class="hidden" onchange="handleWorkOrderFileSelect(event)"></div><div id="workOrderFileName" class="text-sm text-green-600 mt-2 hidden"></div></div></div><button type="button" onclick="processWorkOrder()" class="btn btn-secondary w-full"><i class="fa-solid fa-plus-circle"></i> <span data-i18n="createWorkOrder">Create Work Order</span></button></form></div><div class="space-y-4"><div class="card bg-green-50 border-green-200"><div class="card-body"><h3 class="font-bold text-green-800 mb-2"><i class="fa-solid fa-lightbulb mr-2"></i> <span data-i18n="notes">Notes</span></h3><ul class="text-sm text-green-700 space-y-2 list-disc pl-4"><li data-i18n="selectExistingModel">Select existing model from database</li><li data-i18n="operationsImported">Operations will be imported from selected model</li><li data-i18n="woFileMustContain">Work order file must contain quantities & weights</li><li data-i18n="productionStatusUpdated">Production status updated automatically</li></ul></div></div><div class="card"><div class="card-body"><h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-pie mr-2"></i> <span data-i18n="workOrdersStatistics">Work Orders Statistics</span></h3><div class="grid grid-cols-2 gap-4"><div class="text-center"><span id="totalWorkOrders" class="block text-2xl font-bold text-green-600">0</span><span class="text-xs text-gray-500" data-i18n="workOrders">Work Orders</span></div><div class="text-center"><span id="workOrderItems" class="block text-2xl font-bold text-orange-600">0</span><span class="text-xs text-gray-500" data-i18n="items">Items</span></div></div></div></div></div></div></div>
+                <div class="card-header"><h2 class="text-xl font-bold"><i class="fa-solid fa-file-circle-plus mr-2 text-green-600"></i> <span data-i18n="workOrdersManagement">Work Orders Management</span></h2><div class="entry-actions"><span class="entry-chip"><b id="totalWorkOrders" class="text-green-600">0</b> <span data-i18n="workOrders">Work Orders</span></span><span class="entry-chip"><b id="workOrderItems" class="text-orange-600">0</b> <span data-i18n="items">Items</span></span><button type="button" id="workOrderNewBtn" class="btn btn-secondary btn-sm entry-toggle-btn" onclick="toggleEntryPanel('workOrder')" aria-expanded="false"><i class="fa-solid fa-plus entry-icon"></i> <span class="entry-lbl-new" data-i18n="newWorkOrderBtn">New Work Order</span><span class="entry-lbl-close hidden" data-i18n="close">Close</span></button></div></div>
+                <div id="workOrderEntryPanel" class="card-body hidden entry-panel"><div class="grid grid-cols-1 lg:grid-cols-3 gap-6"><div class="lg:col-span-2"><form id="workOrderForm" class="space-y-4"><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="workOrderName">Work Order Name</label><input type="text" id="workOrderName" class="input-field" required data-i18n-placeholder="workOrderName" placeholder="Example: WO-2024-001"></div><div class="input-group"><label class="input-label" data-i18n="projectName">Project Name</label><input type="text" id="projectName" class="input-field" required data-i18n-placeholder="projectName" placeholder="Example: Northern Network Project"></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="salesOrderNumber">Sales Order Number</label><input type="text" id="salesOrderNumber" class="input-field" required data-i18n-placeholder="salesOrderNumber" placeholder="Example: SO-2024-1001"></div><div class="input-group"><label class="input-label" data-i18n="towerType">Tower Type</label><select id="workOrderTowerType" class="input-field" onchange="populateModelDropdown()" required><option value="" disabled selected data-i18n="selectType">Select type...</option></select></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="input-group"><label class="input-label" data-i18n="modelName">Model</label><select id="workOrderModel" class="input-field" required><option value="" disabled selected data-i18n="selectModel">Select model...</option></select></div><div class="input-group"><label class="input-label" data-i18n="uploadWorkOrderFile">Upload Work Order File</label><div class="backup-card p-4 rounded-lg text-center cursor-pointer" onclick="document.getElementById('workOrderFile').click()"><i class="fa-solid fa-cloud-arrow-up text-3xl text-green-400 mb-2"></i><p class="text-sm font-medium text-gray-700" data-i18n="clickToUpload">Click to upload or drag & drop</p><input type="file" id="workOrderFile" accept=".xlsx,.xls" class="hidden" onchange="handleWorkOrderFileSelect(event)"></div><div id="workOrderFileName" class="text-sm text-green-600 mt-2 hidden"></div></div></div><div class="flex gap-2"><button type="button" onclick="processWorkOrder()" class="btn btn-secondary flex-1"><i class="fa-solid fa-plus-circle"></i> <span data-i18n="createWorkOrder">Create Work Order</span></button><button type="button" class="btn btn-outline" onclick="closeEntryPanel('workOrder')"><i class="fa-solid fa-xmark"></i> <span data-i18n="cancel">Cancel</span></button></div></form></div><div class="space-y-4"><div class="card bg-green-50 border-green-200"><div class="card-body"><h3 class="font-bold text-green-800 mb-2"><i class="fa-solid fa-lightbulb mr-2"></i> <span data-i18n="notes">Notes</span></h3><ul class="text-sm text-green-700 space-y-2 list-disc pl-4"><li data-i18n="selectExistingModel">Select existing model from database</li><li data-i18n="operationsImported">Operations will be imported from selected model</li><li data-i18n="woFileMustContain">Work order file must contain quantities & weights</li><li data-i18n="productionStatusUpdated">Production status updated automatically</li></ul></div></div></div></div></div>
             </div>
             <div class="card">
                 <div class="card-header"><h3 class="text-lg font-bold"><i class="fa-solid fa-file-lines mr-2 text-green-600"></i> <span data-i18n="workOrders">Work Orders</span></h3></div>
@@ -816,9 +816,9 @@
         <section id="downtimeSection" class="hidden space-y-6">
             <div class="card">
                 <div class="card-header">
-                    <h2 class="text-xl font-bold"><i class="fa-solid fa-clock mr-2 text-red-600"></i> <span data-i18n="downtimeRecording">Downtime Recording</span></h2>
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-clock mr-2 text-red-600"></i> <span data-i18n="downtimeRecording">Downtime Recording</span></h2><div class="entry-actions"><span class="entry-chip"><b id="totalDowntimeRecords" class="text-red-600">0</b> <span data-i18n="records">Records</span></span><button type="button" id="downtimeNewBtn" class="btn btn-danger btn-sm entry-toggle-btn" onclick="toggleEntryPanel('downtime')" aria-expanded="false"><i class="fa-solid fa-plus entry-icon"></i> <span class="entry-lbl-new" data-i18n="newDowntimeBtn">New Downtime</span><span class="entry-lbl-close hidden" data-i18n="close">Close</span></button></div>
                 </div>
-                <div class="card-body">
+                <div id="downtimeEntryPanel" class="card-body hidden entry-panel">
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="lg:col-span-2">
                             <form id="downtimeForm" class="space-y-4">
@@ -853,7 +853,7 @@
 
                                 <div class="input-group"><label class="input-label" data-i18n="description">Description</label><textarea id="downtimeDescription" rows="2" class="input-field" data-i18n-placeholder="description" placeholder="Enter details..." required></textarea></div>
                                 <div class="input-group"><label class="input-label" data-i18n="durationMinutes">Calculated Duration (minutes)</label><input type="number" id="downtimeDuration" class="input-field" readonly placeholder="Auto-calculated"></div>
-                                <button type="button" onclick="recordDowntime()" class="btn btn-danger w-full"><i class="fa-solid fa-clock"></i> <span data-i18n="recordDowntime">Record Downtime</span></button>
+                                <div class="flex gap-2"><button type="button" onclick="recordDowntime()" class="btn btn-danger flex-1"><i class="fa-solid fa-clock"></i> <span data-i18n="recordDowntime">Record Downtime</span></button><button type="button" class="btn btn-outline" onclick="closeEntryPanel('downtime')"><i class="fa-solid fa-xmark"></i> <span data-i18n="cancel">Cancel</span></button></div>
                             </form>
                         </div>
                         <div class="space-y-4">
@@ -868,12 +868,7 @@
                                     </ul>
                                 </div>
                             </div>
-                            <div class="card">
-                                <div class="card-body">
-                                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-bar mr-2"></i> <span data-i18n="downtimeStatistics">Downtime Statistics</span></h3>
-                                    <div class="text-center"><span id="totalDowntimeRecords" class="block text-2xl font-bold text-red-600">0</span><span class="text-xs text-gray-500" data-i18n="records">Records</span></div>
-                                </div>
-                            </div>
+                            
                         </div>
                     </div>
                 </div>
@@ -891,9 +886,9 @@
         <section id="ncrSection" class="hidden space-y-6">
             <div class="card">
                 <div class="card-header">
-                    <h2 class="text-xl font-bold"><i class="fa-solid fa-clipboard-list mr-2 text-orange-600"></i> <span data-i18n="ncrTitle">Non-Conformance</span></h2>
+                    <h2 class="text-xl font-bold"><i class="fa-solid fa-clipboard-list mr-2 text-orange-600"></i> <span data-i18n="ncrTitle">Non-Conformance</span></h2><div class="entry-actions"><span class="entry-chip"><b id="totalNCRRecords" class="text-orange-600">0</b> <span data-i18n="ncrRecords">NCR Records</span></span><button type="button" id="ncrNewBtn" class="btn btn-warning btn-sm entry-toggle-btn" onclick="toggleEntryPanel('ncr')" aria-expanded="false"><i class="fa-solid fa-plus entry-icon"></i> <span class="entry-lbl-new" data-i18n="newNCRBtn">New NCR</span><span class="entry-lbl-close hidden" data-i18n="close">Close</span></button></div>
                 </div>
-                <div class="card-body">
+                <div id="ncrEntryPanel" class="card-body hidden entry-panel">
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="lg:col-span-2">
                             <form id="ncrForm" class="space-y-4">
@@ -949,7 +944,7 @@
                                 </div>
 
                                 <div class="input-group"><label class="input-label" data-i18n="ncrComment">Comment</label><textarea id="ncrComment" rows="2" class="input-field" data-i18n-placeholder="ncrComment" placeholder="Describe the issue..."></textarea></div>
-                                <button type="button" onclick="recordNCR()" class="btn btn-warning w-full"><i class="fa-solid fa-file-circle-exclamation"></i> <span data-i18n="recordNCR">Record NCR</span></button>
+                                <div class="flex gap-2"><button type="button" onclick="recordNCR()" class="btn btn-warning flex-1"><i class="fa-solid fa-file-circle-exclamation"></i> <span data-i18n="recordNCR">Record NCR</span></button><button type="button" class="btn btn-outline" onclick="closeEntryPanel('ncr')"><i class="fa-solid fa-xmark"></i> <span data-i18n="cancel">Cancel</span></button></div>
                             </form>
                         </div>
                         <div class="space-y-4">
@@ -963,12 +958,7 @@
                                     </ul>
                                 </div>
                             </div>
-                            <div class="card">
-                                <div class="card-body">
-                                    <h3 class="font-bold text-gray-700 mb-2"><i class="fa-solid fa-chart-bar mr-2"></i> <span data-i18n="ncrStatistics">NCR Statistics</span></h3>
-                                    <div class="text-center"><span id="totalNCRRecords" class="block text-2xl font-bold text-orange-600">0</span><span class="text-xs text-gray-500" data-i18n="ncrRecords">NCR Records</span></div>
-                                </div>
-                            </div>
+                            
                         </div>
                     </div>
                 </div>
@@ -1224,7 +1214,7 @@
     <!-- FOOTER -->
     <footer class="app-footer no-print" id="mainFooter">
         <p>@2026 Created by Walid Ahmed Yosuf</p>
-        <p class="creator-credit">Tower Manufacturing Management System v2.3.0 with OEE, TEEP, NCR, HR, Balance Mode & Sales Order Family Tree</p>
+        <p class="creator-credit">Tower Manufacturing Management System v2.3.1 with OEE, TEEP, NCR, HR, Balance Mode & Sales Order Family Tree</p>
     </footer>
 
     <!-- TOAST CONTAINER -->

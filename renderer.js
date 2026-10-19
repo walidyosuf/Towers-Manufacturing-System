@@ -1,5 +1,6 @@
-// renderer.js - Tower Manufacturing Management System v2.3.0
+// renderer.js - Tower Manufacturing Management System v2.3.1
 // ============================================================================
+// ✅ v2.3.1: لوحات الإدخال (Models / Work Order / Downtime / NCR) مخفية افتراضياً وتُفتح بزر «جديد» لإتاحة كامل الشاشة
 // ✅ v2.3.0: إعادة تصميم Sales Order Family Tree — جدول شجري قابل للطيّ + مؤشرات علوية + تنبيه التأخير (Delayed/Critical)
 //           + بحث وفرز + عرضان فقط (Detailed / Summary) + تصدير Excel/PDF/طباعة سليم
 // ✅ v2.2.14: إضافة Chart View لـ Sales Order Family Tree (3 أوضاع عرض)
@@ -282,6 +283,67 @@ function hasPermission(permission) {
     return perms && perms[permission] === true;
 }
 
+// ============= ENTRY PANELS — لوحات الإدخال (تُفتح بزر «جديد») =============
+// نماذج الإدخال في (Models / Work Order / Downtime / NCR) مخفية افتراضياً لإتاحة كامل الشاشة للقوائم.
+// اجعل القيمة false إن أردت إبقاء اللوحة مفتوحة بعد الحفظ (مثلاً لإدخال عدة سجلات متتالية).
+const ENTRY_PANEL_AUTO_CLOSE = true;
+const ENTRY_PANELS = {
+    models:    { panel: 'modelsEntryPanel',    btn: 'modelsNewBtn',    permission: 'canCreateModel',     focus: 'towerType' },
+    workOrder: { panel: 'workOrderEntryPanel', btn: 'workOrderNewBtn', permission: 'canCreateWorkOrder', focus: 'workOrderName' },
+    downtime:  { panel: 'downtimeEntryPanel',  btn: 'downtimeNewBtn',  permission: 'canRecordDowntime',  focus: 'downtimeShift' },
+    ncr:       { panel: 'ncrEntryPanel',       btn: 'ncrNewBtn',       permission: 'canRecordNCR',       focus: 'ncrShift' }
+};
+
+function setEntryPanelState(key, open) {
+    const cfg = ENTRY_PANELS[key];
+    if (!cfg) return;
+    const panel = document.getElementById(cfg.panel);
+    const btn = document.getElementById(cfg.btn);
+    if (panel) panel.classList.toggle('hidden', !open);
+    if (btn) {
+        btn.classList.toggle('open', open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        const icon = btn.querySelector('.entry-icon');
+        if (icon) { icon.classList.toggle('fa-plus', !open); icon.classList.toggle('fa-xmark', open); }
+        const lblNew = btn.querySelector('.entry-lbl-new');
+        const lblClose = btn.querySelector('.entry-lbl-close');
+        if (lblNew) lblNew.classList.toggle('hidden', open);
+        if (lblClose) lblClose.classList.toggle('hidden', !open);
+    }
+}
+
+function openEntryPanel(key) {
+    const cfg = ENTRY_PANELS[key];
+    if (!cfg) return;
+    if (!hasPermission(cfg.permission)) { showToast('غير مسموح لك بإضافة سجل جديد', 'error'); return; }
+    setEntryPanelState(key, true);
+    const panel = document.getElementById(cfg.panel);
+    setTimeout(() => {
+        const first = document.getElementById(cfg.focus);
+        if (first && typeof first.focus === 'function') first.focus({ preventScroll: true });
+        if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 60);
+}
+
+function closeEntryPanel(key) { setEntryPanelState(key, false); }
+
+function toggleEntryPanel(key) {
+    const cfg = ENTRY_PANELS[key];
+    if (!cfg) return;
+    const panel = document.getElementById(cfg.panel);
+    if (panel && !panel.classList.contains('hidden')) closeEntryPanel(key); else openEntryPanel(key);
+}
+
+// إخفاء زر «جديد» (وإغلاق اللوحة) عند غياب صلاحية الإدخال
+function syncEntryPanelPermission(key) {
+    const cfg = ENTRY_PANELS[key];
+    if (!cfg) return;
+    const allowed = hasPermission(cfg.permission);
+    const btn = document.getElementById(cfg.btn);
+    if (btn) btn.style.display = allowed ? '' : 'none';
+    if (!allowed) closeEntryPanel(key);
+}
+
 function applyPermissionsToCurrentSection() {
     const visibleSection = document.querySelector('section:not(.hidden)');
     if (!visibleSection) return;
@@ -290,10 +352,12 @@ function applyPermissionsToCurrentSection() {
         case 'modelsSection':
             const modelsForm = document.querySelector('#modelsSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
             if (modelsForm) modelsForm.style.display = hasPermission('canCreateModel') ? '' : 'none';
+            syncEntryPanelPermission('models');
             break;
         case 'workOrderSection':
             const woForm = document.querySelector('#workOrderSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
             if (woForm) woForm.style.display = hasPermission('canCreateWorkOrder') ? '' : 'none';
+            syncEntryPanelPermission('workOrder');
             break;
         case 'productionSection':
             const prodForm = document.querySelector('#productionSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
@@ -304,10 +368,12 @@ function applyPermissionsToCurrentSection() {
         case 'downtimeSection':
             const dtForm = document.querySelector('#downtimeSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
             if (dtForm) dtForm.style.display = hasPermission('canRecordDowntime') ? '' : 'none';
+            syncEntryPanelPermission('downtime');
             break;
         case 'ncrSection':
             const ncrForm = document.querySelector('#ncrSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
             if (ncrForm) ncrForm.style.display = hasPermission('canRecordNCR') ? '' : 'none';
+            syncEntryPanelPermission('ncr');
             break;
         case 'hrSection':
             const hrForm = document.querySelector('#hrSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
@@ -804,7 +870,9 @@ const translations = {
         operationsProcessed: "Operations processed automatically ", statistics: "Statistics ",
         models: "Models ", items: "Items ", savedModels: "Saved Models ", searchModel: "Search model... ",
         noSavedModels: "No saved models. ", modelDetails: "Model Details ", close: "Close ",
-        createNewWorkOrder: "Create New Work Order ", workOrderName: "Work Order Name ",
+        createNewWorkOrder: "Create New Work Order ",
+        newModelBtn: "New Model", newWorkOrderBtn: "New Work Order", newDowntimeBtn: "New Downtime", newNCRBtn: "New NCR",
+        workOrdersManagement: "Work Orders Management", workOrderName: "Work Order Name ",
         projectName: "Project Name ", salesOrderNumber: "Sales Order Number ", uploadWorkOrderFile: "Upload Work Order File ",
         createWorkOrder: "Create Work Order ", notes: "Notes ", selectExistingModel: "Select existing model from database ",
         operationsImported: "Operations will be imported from selected model ",
@@ -952,7 +1020,9 @@ const translations = {
         operationsProcessed: "معالجة العمليات تلقائياً ", statistics: "إحصائيات ",
         models: "نماذج ", items: "بنود ", savedModels: "النماذج المحفوظة ", searchModel: "بحث في النماذج... ",
         noSavedModels: "لا توجد نماذج محفوظة. ", modelDetails: "تفاصيل النموذج ", close: "إغلاق ",
-        createNewWorkOrder: "إنشاء أمر عمل جديد ", workOrderName: "اسم أمر العمل ",
+        createNewWorkOrder: "إنشاء أمر عمل جديد ",
+        newModelBtn: "نموذج جديد", newWorkOrderBtn: "أمر عمل جديد", newDowntimeBtn: "تسجيل توقف جديد", newNCRBtn: "تسجيل عدم مطابقة جديد",
+        workOrdersManagement: "إدارة أوامر العمل", workOrderName: "اسم أمر العمل ",
         projectName: "اسم المشروع ", salesOrderNumber: "رقم أمر المبيعات ", uploadWorkOrderFile: "رفع ملف أمر العمل ",
         createWorkOrder: "إنشاء أمر العمل ", notes: "ملاحظات ", selectExistingModel: "اختر نموذجاً من قاعدة البيانات ",
         operationsImported: "سيتم استيراد العمليات من النموذج المحدد ",
@@ -2569,6 +2639,7 @@ async function processData() {
         await saveAllData();
         updateStats(); renderModelsList(); populateTowerTypeDropdown(); populateProductionTowerTypeDropdown();
         document.getElementById('uploadForm').reset(); document.getElementById('fileName').classList.add('hidden'); currentExcelData = [];
+        if (ENTRY_PANEL_AUTO_CLOSE) closeEntryPanel('models');
         hideLoading(); showToast(translations[currentLanguage].modelSaved, 'success');
     } catch (err) { hideLoading(); showToast('Error processing data', 'error'); console.error(err); }
 }
@@ -2620,6 +2691,7 @@ async function processWorkOrder() {
         await saveToServer('workOrdersDB', workOrdersDB);
         currentWorkOrder = workOrder;
         document.getElementById('workOrderForm').reset(); document.getElementById('workOrderFileName').classList.add('hidden'); currentWorkOrderData = [];
+        if (ENTRY_PANEL_AUTO_CLOSE) closeEntryPanel('workOrder');
         populateTowerTypeDropdown(); populateProductionTowerTypeDropdown(); populateDailyReportWorkOrders(); populateNCRWorkOrders();
         updateStats(); renderWorkOrdersList(); renderDashboard();
         showWorkOrderDetails(workOrder.id);
@@ -3038,6 +3110,7 @@ async function recordDowntime() {
     await saveToServer('downtimeDB', downtimeDB);
     document.getElementById('downtimeForm').reset();
     document.getElementById('downtimeDate').value = getLocalDateStr();
+    if (ENTRY_PANEL_AUTO_CLOSE) closeEntryPanel('downtime');
     const workerGroup = document.getElementById('workerNameGroup');
     if (workerGroup) workerGroup.classList.add('hidden');
     updateStats(); renderDowntimeList(); renderDashboard();
@@ -3158,6 +3231,7 @@ async function recordNCR() {
 
     document.getElementById('ncrForm').reset();
     document.getElementById('ncrDate').value = getLocalDateStr();
+    if (ENTRY_PANEL_AUTO_CLOSE) closeEntryPanel('ncr');
     const woSearch = document.getElementById('ncrWorkOrderSearch');
     const itemSearch = document.getElementById('ncrItemSearch');
     if (woSearch) woSearch.value = '';

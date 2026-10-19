@@ -133,6 +133,7 @@
         .badge-danger { background: #fee2e2; color: #991b1b; }
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-primary { background: #e8eaf6; color: var(--primary-color); }
+        .badge-secondary { background: #e5e7eb; color: #374151; }
 
         .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; visibility: hidden; transition: all 0.3s ease; }
         .modal.active { opacity: 1; visibility: visible; }
@@ -162,7 +163,7 @@
         .sidebar { position: fixed; left: 0; top: 0; width: 220px; height: 100vh; background: linear-gradient(to bottom, #1a237e, #283593); color: white; overflow-y: auto; z-index: 100; padding-top: 80px; box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1); }
         .rtl .sidebar { left: auto; right: 0; box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1); }
         .sidebar-tabs { display: flex; flex-direction: column; padding: 1rem 0; }
-        .sidebar-tab { padding: 0.875rem 1.25rem; font-weight: 600; color: rgba(255, 255, 255, 0.8); border-left: 3px solid transparent; white-space: nowrap; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 0.75rem; text-decoration: none; margin: 0.25rem 0; }
+        .sidebar-tab { padding: 0.875rem 1.25rem; font-weight: 600; color: rgba(255, 255, 255, 0.8); border-left: 3px solid transparent; white-space: nowrap; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 0.75rem; text-decoration: none; margin: 0.25rem 0; background: transparent; border-top: none; border-right: none; border-bottom: none; }
         .rtl .sidebar-tab { border-left: none; border-right: 3px solid transparent; }
         .sidebar-tab:hover { color: #ffffff; background: rgba(255, 255, 255, 0.1); border-left-color: rgba(255, 255, 255, 0.3); }
         .rtl .sidebar-tab:hover { border-right-color: rgba(255, 255, 255, 0.3); }
@@ -208,6 +209,8 @@
             .no-print, .action-buttons { display: none !important; }
             .table { font-size: 10pt !important; }
             .table th, .table td { padding: 0.5rem !important; }
+            .so-wo-row { display: table-row !important; }
+            .so-badge-critical { animation: none; }
         }
 
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -306,6 +309,34 @@
         .btn-convert-archived { background: linear-gradient(135deg, #f59e0b, #d97706) !important; border: 3px solid #b45309 !important; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4) !important; padding: 0.75rem 1.5rem !important; border-radius: 0.5rem !important; font-weight: 700 !important; font-size: 1rem !important; color: white !important; transition: all 0.2s ease !important; display: inline-flex !important; align-items: center !important; gap: 0.75rem !important; width: 100% !important; justify-content: center !important; }
         .btn-convert-archived:hover { transform: scale(1.02) !important; box-shadow: 0 6px 25px rgba(245, 158, 11, 0.5) !important; }
         .btn-convert-archived i { font-size: 1.25rem !important; }
+
+        /* Family Tree Styles (v2.3.0 — collapsible tree table + delay alerts) */
+        .so-row { background: #e0f2fe; border-top: 3px solid #0369a1; cursor: pointer; transition: background 0.15s ease; }
+        .so-row:hover { background: #bae6fd; }
+        .so-row-static { cursor: default; }
+        .so-row-static:hover { background: #e0f2fe; }
+        .so-chev { color: #0369a1; font-size: 0.8rem; transition: transform 0.15s ease; }
+        .so-row.open .so-chev { transform: rotate(90deg); }
+        .so-wo-row { background: #f8fafc; }
+        .so-wo-row:nth-of-type(even) { background: #fff; }
+        .so-wo-row.delayed { background: #fffbeb; box-shadow: inset 4px 0 0 #d97706; }
+        .so-wo-row.critical { background: #fef2f2; box-shadow: inset 4px 0 0 #dc2626; }
+        .so-conn { display: inline-block; width: 14px; height: 18px; border-left: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; border-bottom-left-radius: 4px; margin-top: -10px; flex-shrink: 0; }
+        .so-conn.last { border-left-color: #cbd5e1; }
+        .so-total-row { background: #fef3c7; font-weight: 700; border-top: 2px solid #f59e0b; }
+        .so-pbar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; min-width: 80px; margin: 0 auto 2px; }
+        .so-pbar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+        .so-stack { display: flex; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin-top: 4px; max-width: 220px; }
+        .so-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+        .so-badge { display: inline-block; padding: 0.12rem 0.55rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; color: #fff; white-space: nowrap; }
+        .so-badge-ok { background: #059669; }
+        .so-badge-progress { background: #d97706; }
+        .so-badge-notstarted { background: #dc2626; }
+        .so-badge-archived { background: #7c3aed; }
+        .so-badge-delayed { background: #ea580c; }
+        .so-badge-critical { background: #dc2626; animation: so-pulse 1.6s ease-in-out infinite; }
+        .so-badge-neutral { background: #94a3b8; }
+        @keyframes so-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
     </style>
 </head>
 <body class="text-gray-800 ltr">
@@ -799,11 +830,11 @@
                                 </div>
                                 <div class="input-group"><label class="input-label" data-i18n="machineName">Machine</label><select id="downtimeMachine" class="input-field" required><option value="" disabled selected data-i18n="selectMachine">Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div>
 
-                                <!-- ✅ قائمة نوع العطل الجديدة -->
+                                <!-- قائمة نوع العطل -->
                                 <div class="input-group">
-                                    <label class="input-label" data-i18n="downtimeType">Fault Type</label>
+                                    <label class="input-label" data-i18n="downtimeType">Fault Type / نوع العطل</label>
                                     <select id="downtimeType" class="input-field" required onchange="onDowntimeTypeChange()">
-                                        <option value="" disabled selected data-i18n="selectDowntimeType">Select type...</option>
+                                        <option value="" disabled selected>اختر نوع العطل...</option>
                                         <option value="Machine">ماكينة - Machine</option>
                                         <option value="Material">خامة - Material</option>
                                         <option value="Worker">عامل - Worker</option>
@@ -811,14 +842,13 @@
                                     </select>
                                 </div>
 
-                                <!-- ✅ حقل اسم العامل (يظهر فقط عند اختيار "عامل") -->
+                                <!-- حقل اسم العامل (يظهر فقط عند اختيار "عامل") -->
                                 <div class="input-group hidden" id="workerNameGroup">
                                     <label class="input-label">
                                         <i class="fa-solid fa-user text-blue-600 mr-1"></i>
-                                        <span data-i18n="workerName">Worker Name</span>
+                                        <span data-i18n="workerName">Worker Name / اسم العامل</span>
                                     </label>
-                                    <input type="text" id="downtimeWorkerName" class="input-field"
-                                           data-i18n-placeholder="workerNamePlaceholder" placeholder="Enter worker name...">
+                                    <input type="text" id="downtimeWorkerName" class="input-field" placeholder="أدخل اسم العامل...">
                                 </div>
 
                                 <div class="input-group"><label class="input-label" data-i18n="description">Description</label><textarea id="downtimeDescription" rows="2" class="input-field" data-i18n-placeholder="description" placeholder="Enter details..." required></textarea></div>
@@ -871,25 +901,53 @@
                                     <div class="input-group"><label class="input-label" data-i18n="date">Date</label><input type="date" id="ncrDate" class="input-field" required></div>
                                     <div class="input-group"><label class="input-label" data-i18n="shift">Shift</label><select id="ncrShift" class="input-field" required><option value="" disabled selected data-i18n="selectShift">Select shift...</option><option value="First Shift" data-i18n="firstShift">First Shift</option><option value="Second Shift" data-i18n="secondShift">Second Shift</option><option value="Third Shift" data-i18n="thirdShift">Third Shift</option></select></div>
                                     <div class="input-group"><label class="input-label" data-i18n="machineName">Machine</label><select id="ncrMachine" class="input-field" required><option value="" disabled selected data-i18n="selectMachine">Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div>
+
+                                    <!-- Work Order + Search -->
                                     <div class="input-group">
                                         <label class="input-label" data-i18n="selectWorkOrder">Work Order</label>
-                                        <input type="text" id="ncrWorkOrderSearch" class="input-field mb-2"
-                                               placeholder="Search work order..." oninput="filterNCRWorkOrderSelect()">
+                                        <input type="text" id="ncrWorkOrderSearch" class="input-field mb-2" placeholder="ابحث عن أمر العمل..." oninput="filterNCRWorkOrderSelect()">
                                         <select id="ncrWorkOrder" class="input-field" onchange="populateNCRItems()" required>
                                             <option value="" disabled selected data-i18n="selectWorkOrder">Select work order...</option>
                                         </select>
                                     </div>
+
+                                    <!-- Item + Search -->
                                     <div class="input-group">
                                         <label class="input-label" data-i18n="selectItem">Item</label>
-                                        <input type="text" id="ncrItemSearch" class="input-field mb-2"
-                                               placeholder="Search item (e.g. A1)..." oninput="filterNCRItemSelect()">
+                                        <input type="text" id="ncrItemSearch" class="input-field mb-2" placeholder="ابحث عن البند (مثال: A1)..." oninput="filterNCRItemSelect()">
                                         <select id="ncrItem" class="input-field" required>
                                             <option value="" disabled selected data-i18n="selectItem">Select item...</option>
                                         </select>
                                     </div>
+
                                     <div class="input-group"><label class="input-label" data-i18n="rejectedQty">Rejected Quantity</label><input type="number" id="ncrRejectedQty" min="1" class="input-field" required></div>
                                     <div class="input-group"><label class="input-label" data-i18n="ncrType">NCR Type</label><select id="ncrType" class="input-field" required><option value="" disabled selected data-i18n="selectType">Select type...</option><option value="Scrap" data-i18n="scrap">Scrap</option><option value="Accept as it is" data-i18n="acceptAsIs">Accept as it is</option><option value="Repair" data-i18n="repair">Repair</option></select></div>
                                 </div>
+
+                                <!-- حقل سبب NCR -->
+                                <div class="input-group">
+                                    <label class="input-label">
+                                        <i class="fa-solid fa-circle-question text-orange-600 mr-1"></i>
+                                        <span data-i18n="ncrCause">NCR Cause / سبب NCR</span>
+                                    </label>
+                                    <select id="ncrCause" class="input-field" required onchange="onNCRCauseChange()">
+                                        <option value="" disabled selected>اختر السبب...</option>
+                                        <option value="Worker">عامل - Worker</option>
+                                        <option value="Machine">ماكينة - Machine</option>
+                                        <option value="Drawing">الرسم الهندسي - Workshop Drawing</option>
+                                        <option value="Material">خامة - Material</option>
+                                    </select>
+                                </div>
+
+                                <!-- حقل اسم العامل في NCR (يظهر فقط عند اختيار "عامل") -->
+                                <div class="input-group hidden" id="ncrWorkerNameGroup">
+                                    <label class="input-label">
+                                        <i class="fa-solid fa-user text-blue-600 mr-1"></i>
+                                        <span data-i18n="workerName">Worker Name / اسم العامل</span>
+                                    </label>
+                                    <input type="text" id="ncrWorkerName" class="input-field" placeholder="أدخل اسم العامل...">
+                                </div>
+
                                 <div class="input-group"><label class="input-label" data-i18n="ncrComment">Comment</label><textarea id="ncrComment" rows="2" class="input-field" data-i18n-placeholder="ncrComment" placeholder="Describe the issue..."></textarea></div>
                                 <button type="button" onclick="recordNCR()" class="btn btn-warning w-full"><i class="fa-solid fa-file-circle-exclamation"></i> <span data-i18n="recordNCR">Record NCR</span></button>
                             </form>
@@ -992,6 +1050,19 @@
                 </div>
                 <div class="card-body">
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="reportCardsContainer">
+
+                        <!-- ✅ Sales Order Family Tree -->
+                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-emerald-500" onclick="selectReportType('salesOrderTree')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-sitemap text-2xl text-emerald-600"></i>
+                                    <h3 class="font-bold text-lg">Sales Order Family Tree</h3>
+                                </div>
+                                <p class="text-sm text-gray-500">Hierarchical tree for each Sales Order with its Work Orders, status and delay alerts</p>
+                            </div>
+                        </div>
+
+                        <!-- Project Stage Summary -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-teal-500" onclick="selectReportType('projectStageSummary')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1002,6 +1073,7 @@
                             </div>
                         </div>
 
+                        <!-- WIP After Minimum -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-amber-500" onclick="selectReportType('minimumStoppage')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1012,6 +1084,7 @@
                             </div>
                         </div>
 
+                        <!-- Monthly Production -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-purple-500" onclick="selectReportType('monthlyProduction')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1022,6 +1095,7 @@
                             </div>
                         </div>
 
+                        <!-- Items Status -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-blue-500" onclick="selectReportType('itemsStatus')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1032,6 +1106,7 @@
                             </div>
                         </div>
 
+                        <!-- Detailed Item -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-pink-500" onclick="selectReportType('detailedItem')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1042,6 +1117,7 @@
                             </div>
                         </div>
 
+                        <!-- Daily Production -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-green-500" onclick="selectReportType('dailyProduction')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1052,6 +1128,7 @@
                             </div>
                         </div>
 
+                        <!-- Operation Status -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-orange-500" onclick="selectReportType('operationStatus')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1062,6 +1139,7 @@
                             </div>
                         </div>
 
+                        <!-- Shortage -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-red-500" onclick="selectReportType('shortage')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1072,6 +1150,7 @@
                             </div>
                         </div>
 
+                        <!-- Downtime -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-yellow-500" onclick="selectReportType('downtime')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1082,6 +1161,7 @@
                             </div>
                         </div>
 
+                        <!-- NCR Report -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-rose-500" onclick="selectReportType('ncrReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1092,6 +1172,7 @@
                             </div>
                         </div>
 
+                        <!-- OEE -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-indigo-500" onclick="selectReportType('oeeReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1102,6 +1183,7 @@
                             </div>
                         </div>
 
+                        <!-- TEEP -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-cyan-500" onclick="selectReportType('teepReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1126,6 +1208,7 @@
                                 </div>
                             </div>
                             <div class="card-body overflow-x-auto">
+                                <div id="reportSummaryStrip"></div>
                                 <table class="compact-table w-full">
                                     <thead id="reportTableHeader"></thead>
                                     <tbody id="reportTableBody"></tbody>
@@ -1141,7 +1224,7 @@
     <!-- FOOTER -->
     <footer class="app-footer no-print" id="mainFooter">
         <p>@2026 Created by Walid Ahmed Yosuf</p>
-        <p class="creator-credit">Tower Manufacturing Management System v2.2.0 with OEE, TEEP, NCR, HR & Balance Mode</p>
+        <p class="creator-credit">Tower Manufacturing Management System v2.3.0 with OEE, TEEP, NCR, HR, Balance Mode & Sales Order Family Tree</p>
     </footer>
 
     <!-- TOAST CONTAINER -->

@@ -310,7 +310,7 @@
         .btn-convert-archived:hover { transform: scale(1.02) !important; box-shadow: 0 6px 25px rgba(245, 158, 11, 0.5) !important; }
         .btn-convert-archived i { font-size: 1.25rem !important; }
 
-        /* Entry panels (v2.3.1) — input forms are hidden until the user presses the "New" button */
+        /* Entry panels (v2.3.1) */
         .entry-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
         .entry-chip { background: #f1f5f9; border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.78rem; color: #475569; white-space: nowrap; }
         .entry-chip b { font-size: 1rem; font-weight: 800; margin-right: 2px; }
@@ -318,7 +318,7 @@
         .entry-toggle-btn.open:hover { background: #f9fafb; border-color: #9ca3af; }
         .entry-panel { animation: fadeIn 0.25s ease-out; border-bottom: 2px solid #f3f4f6; }
 
-        /* Family Tree Styles (v2.3.0 — collapsible tree table + delay alerts) */
+        /* Family Tree Styles */
         .so-row { background: #e0f2fe; border-top: 3px solid #0369a1; cursor: pointer; transition: background 0.15s ease; }
         .so-row:hover { background: #bae6fd; }
         .so-row-static { cursor: default; }
@@ -753,9 +753,99 @@
             <div class="card">
                 <div class="card-header">
                     <h2 class="text-xl font-bold"><i class="fa-solid fa-industry mr-2 text-purple-600"></i> <span data-i18n="dailyProduction">Daily Production</span></h2>
-                    <div class="flex gap-2"><button onclick="saveProductionPreferences()" class="btn btn-secondary btn-sm"><i class="fa-solid fa-bookmark"></i> <span data-i18n="save">Save</span></button><button onclick="clearProductionForm()" class="btn btn-outline btn-sm"><i class="fa-solid fa-eraser"></i> <span data-i18n="clear">Clear</span></button></div>
+                    <div class="flex gap-2 flex-wrap">
+                        <!-- ✅ v2.4.1: NEW — Add Daily Production (manual entry) toggle -->
+                        <button type="button" id="productionNewBtn" class="btn btn-primary btn-sm entry-toggle-btn" onclick="toggleProductionEntryPanel()" aria-expanded="false">
+                            <i class="fa-solid fa-plus entry-icon"></i>
+                            <span class="entry-lbl-new" data-i18n="newProductionBtn">Add Daily Production</span>
+                            <span class="entry-lbl-close hidden" data-i18n="close">Close</span>
+                        </button>
+                        <!-- ✅ v2.4.0: Excel Import Toggle -->
+                        <button onclick="toggleProductionExcelPanel()" class="btn btn-warning btn-sm" id="productionExcelToggleBtn">
+                            <i class="fa-solid fa-file-excel"></i> Import from Excel
+                        </button>
+                    </div>
                 </div>
-                <div class="card-body">
+
+                <!-- ✅ v2.4.0: Excel Import Panel (hidden by default) -->
+                <div id="productionExcelPanel" class="card-body hidden entry-panel" style="background:#fffbeb; border-bottom:2px solid #fde68a;">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2">
+                            <h3 class="font-bold mb-2 text-yellow-900">
+                                <i class="fa-solid fa-file-excel mr-2 text-green-600"></i>
+                                Import Production Records from Excel
+                            </h3>
+                            <p class="text-sm text-gray-600 mb-3">
+                                Upload an Excel file with production rows. Required columns:
+                                <strong>Work Order</strong>, <strong>Item Name</strong>, <strong>Operation</strong>, <strong>Quantity</strong>.<br>
+                                Included columns: <strong>Machine</strong>, <strong>Shift</strong>, <strong>Operator</strong> — prefilled based on the operation type.<br>
+                                Optional: <em>Rejected Qty</em>, <em>Date</em>.
+                            </p>
+
+                            <div class="backup-card p-6 rounded-lg text-center cursor-pointer" onclick="document.getElementById('productionExcelFile').click()">
+                                <i class="fa-solid fa-cloud-arrow-up text-4xl text-yellow-500 mb-3"></i>
+                                <p class="text-sm font-medium text-gray-700 mb-1">Click to upload Excel file (.xlsx / .xls)</p>
+                                <p class="text-xs text-gray-500">The system will validate work orders, items and operations automatically</p>
+                                <input type="file" id="productionExcelFile" accept=".xlsx,.xls" class="hidden" onchange="handleProductionExcelSelect(event)">
+                            </div>
+                            <div id="productionExcelFileName" class="text-sm text-green-600 mt-2 hidden"></div>
+
+                            <div class="flex gap-2 mt-4 flex-wrap">
+                                <button onclick="processProductionExcel()" class="btn btn-primary flex-1" style="min-width:180px;">
+                                    <i class="fa-solid fa-upload"></i> Process & Save
+                                </button>
+                                <button onclick="downloadProductionExcelTemplate()" class="btn btn-outline">
+                                    <i class="fa-solid fa-download"></i> Download Template
+                                </button>
+                                <button onclick="toggleProductionExcelPanel()" class="btn btn-outline">
+                                    <i class="fa-solid fa-xmark"></i> Cancel
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="card bg-yellow-100 border-yellow-300 p-4">
+                                <h4 class="font-bold text-yellow-900 mb-2">
+                                    <i class="fa-solid fa-circle-info mr-2"></i> Column Format
+                                </h4>
+                                <ul class="text-sm text-yellow-800 space-y-1 list-disc pl-4">
+                                    <li><strong>Work Order</strong> — name or ID <span class="text-red-700">(required)</span></li>
+                                    <li><strong>Item Name</strong> — exact name <span class="text-red-700">(required)</span></li>
+                                    <li><strong>Operation</strong> — e.g. Minimum / Cropping <span class="text-red-700">(required)</span></li>
+                                    <li><strong>Quantity</strong> — pieces produced <span class="text-red-700">(required)</span></li>
+                                    <li><strong>Machine</strong> — prefilled from operation; editable</li>
+                                    <li><strong>Shift</strong> — prefilled <b>First Shift</b>; editable</li>
+                                    <li><strong>Operator</strong> — prefilled <b>Excel Import</b>; editable</li>
+                                    <li>Rejected Qty — default <b>0</b></li>
+                                    <li>Date — default <b>today</b></li>
+                                </ul>
+                                <hr class="my-2 border-yellow-300">
+                                <p class="text-xs text-yellow-800">
+                                    <i class="fa-solid fa-lightbulb mr-1 text-amber-700"></i>
+                                    If <b>Machine</b> is left empty for a row, the system derives it automatically from the operation type.
+                                </p>
+                                <hr class="my-2 border-yellow-300">
+                                <p class="text-xs text-yellow-800">
+                                    <i class="fa-solid fa-check-circle mr-1 text-green-700"></i>
+                                    Each row updates the corresponding operation in the work order, and adds a production record.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ✅ v2.4.1: Manual entry panel — hidden by default; opened via "Add Daily Production" -->
+                <div id="productionEntryPanel" class="card-body hidden entry-panel">
+                    <!-- Save / Clear buttons moved inside the panel so they appear only when open -->
+                    <div class="flex justify-end gap-2 mb-4">
+                        <button onclick="saveProductionPreferences()" class="btn btn-secondary btn-sm">
+                            <i class="fa-solid fa-bookmark"></i> <span data-i18n="save">Save</span>
+                        </button>
+                        <button onclick="clearProductionForm()" class="btn btn-outline btn-sm">
+                            <i class="fa-solid fa-eraser"></i> <span data-i18n="clear">Clear</span>
+                        </button>
+                    </div>
+
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="lg:col-span-2">
                             <form id="productionForm" class="space-y-4">
@@ -830,7 +920,6 @@
                                 </div>
                                 <div class="input-group"><label class="input-label" data-i18n="machineName">Machine</label><select id="downtimeMachine" class="input-field" required><option value="" disabled selected data-i18n="selectMachine">Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div>
 
-                                <!-- قائمة نوع العطل -->
                                 <div class="input-group">
                                     <label class="input-label" data-i18n="downtimeType">Fault Type / نوع العطل</label>
                                     <select id="downtimeType" class="input-field" required onchange="onDowntimeTypeChange()">
@@ -842,7 +931,6 @@
                                     </select>
                                 </div>
 
-                                <!-- حقل اسم العامل (يظهر فقط عند اختيار "عامل") -->
                                 <div class="input-group hidden" id="workerNameGroup">
                                     <label class="input-label">
                                         <i class="fa-solid fa-user text-blue-600 mr-1"></i>
@@ -897,7 +985,6 @@
                                     <div class="input-group"><label class="input-label" data-i18n="shift">Shift</label><select id="ncrShift" class="input-field" required><option value="" disabled selected data-i18n="selectShift">Select shift...</option><option value="First Shift" data-i18n="firstShift">First Shift</option><option value="Second Shift" data-i18n="secondShift">Second Shift</option><option value="Third Shift" data-i18n="thirdShift">Third Shift</option></select></div>
                                     <div class="input-group"><label class="input-label" data-i18n="machineName">Machine</label><select id="ncrMachine" class="input-field" required><option value="" disabled selected data-i18n="selectMachine">Select machine...</option><option value="206">206</option><option value="20.20">20.20</option><option value="10.10">10.10</option><option value="Cropping">Cropping</option><option value="Manual Plasma">Manual Plasma</option><option value="Press">Press</option><option value="Drill">Drill</option><option value="Chamfering">Chamfering</option><option value="Shear">Shear</option><option value="83P">83P</option><option value="CNC Bending">CNC Bending</option><option value="Finishing">Finishing</option></select></div>
 
-                                    <!-- Work Order + Search -->
                                     <div class="input-group">
                                         <label class="input-label" data-i18n="selectWorkOrder">Work Order</label>
                                         <input type="text" id="ncrWorkOrderSearch" class="input-field mb-2" placeholder="ابحث عن أمر العمل..." oninput="filterNCRWorkOrderSelect()">
@@ -906,7 +993,6 @@
                                         </select>
                                     </div>
 
-                                    <!-- Item + Search -->
                                     <div class="input-group">
                                         <label class="input-label" data-i18n="selectItem">Item</label>
                                         <input type="text" id="ncrItemSearch" class="input-field mb-2" placeholder="ابحث عن البند (مثال: A1)..." oninput="filterNCRItemSelect()">
@@ -919,7 +1005,6 @@
                                     <div class="input-group"><label class="input-label" data-i18n="ncrType">NCR Type</label><select id="ncrType" class="input-field" required><option value="" disabled selected data-i18n="selectType">Select type...</option><option value="Scrap" data-i18n="scrap">Scrap</option><option value="Accept as it is" data-i18n="acceptAsIs">Accept as it is</option><option value="Repair" data-i18n="repair">Repair</option></select></div>
                                 </div>
 
-                                <!-- حقل سبب NCR -->
                                 <div class="input-group">
                                     <label class="input-label">
                                         <i class="fa-solid fa-circle-question text-orange-600 mr-1"></i>
@@ -934,7 +1019,6 @@
                                     </select>
                                 </div>
 
-                                <!-- حقل اسم العامل في NCR (يظهر فقط عند اختيار "عامل") -->
                                 <div class="input-group hidden" id="ncrWorkerNameGroup">
                                     <label class="input-label">
                                         <i class="fa-solid fa-user text-blue-600 mr-1"></i>
@@ -1041,7 +1125,6 @@
                 <div class="card-body">
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="reportCardsContainer">
 
-                        <!-- ✅ Sales Order Family Tree -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-emerald-500" onclick="selectReportType('salesOrderTree')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1052,7 +1135,6 @@
                             </div>
                         </div>
 
-                        <!-- Project Stage Summary -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-teal-500" onclick="selectReportType('projectStageSummary')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1063,7 +1145,6 @@
                             </div>
                         </div>
 
-                        <!-- WIP After Minimum -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-amber-500" onclick="selectReportType('minimumStoppage')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1074,7 +1155,6 @@
                             </div>
                         </div>
 
-                        <!-- Monthly Production -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-purple-500" onclick="selectReportType('monthlyProduction')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1085,7 +1165,6 @@
                             </div>
                         </div>
 
-                        <!-- Items Status -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-blue-500" onclick="selectReportType('itemsStatus')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1096,7 +1175,6 @@
                             </div>
                         </div>
 
-                        <!-- Detailed Item -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-pink-500" onclick="selectReportType('detailedItem')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1107,7 +1185,6 @@
                             </div>
                         </div>
 
-                        <!-- Daily Production -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-green-500" onclick="selectReportType('dailyProduction')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1118,7 +1195,6 @@
                             </div>
                         </div>
 
-                        <!-- Operation Status -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-orange-500" onclick="selectReportType('operationStatus')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1129,7 +1205,6 @@
                             </div>
                         </div>
 
-                        <!-- Shortage -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-red-500" onclick="selectReportType('shortage')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1140,7 +1215,6 @@
                             </div>
                         </div>
 
-                        <!-- Downtime -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-yellow-500" onclick="selectReportType('downtime')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1151,7 +1225,6 @@
                             </div>
                         </div>
 
-                        <!-- NCR Report -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-rose-500" onclick="selectReportType('ncrReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1162,7 +1235,6 @@
                             </div>
                         </div>
 
-                        <!-- OEE -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-indigo-500" onclick="selectReportType('oeeReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1173,7 +1245,6 @@
                             </div>
                         </div>
 
-                        <!-- TEEP -->
                         <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-cyan-500" onclick="selectReportType('teepReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
@@ -1214,7 +1285,7 @@
     <!-- FOOTER -->
     <footer class="app-footer no-print" id="mainFooter">
         <p>@2026 Created by Walid Ahmed Yosuf</p>
-        <p class="creator-credit">Tower Manufacturing Management System v2.3.1 with OEE, TEEP, NCR, HR, Balance Mode & Sales Order Family Tree</p>
+        <p class="creator-credit">Tower Manufacturing Management System v2.4.1 with OEE, TEEP, NCR, HR, Balance Mode, Sales Order Family Tree & Excel Production Import</p>
     </footer>
 
     <!-- TOAST CONTAINER -->

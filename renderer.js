@@ -1,14 +1,18 @@
-// renderer.js - Tower Manufacturing Management System v2.3.1
+// renderer.js - Tower Manufacturing Management System v2.4.1
 // ============================================================================
-// ✅ v2.3.1: لوحات الإدخال (Models / Work Order / Downtime / NCR) مخفية افتراضياً وتُفتح بزر «جديد» لإتاحة كامل الشاشة
-// ✅ v2.3.0: إعادة تصميم Sales Order Family Tree — جدول شجري قابل للطيّ + مؤشرات علوية + تنبيه التأخير (Delayed/Critical)
-//           + بحث وفرز + عرضان فقط (Detailed / Summary) + تصدير Excel/PDF/طباعة سليم
-// ✅ v2.2.14: إضافة Chart View لـ Sales Order Family Tree (3 أوضاع عرض)
-// ✅ v2.2.13: Sales Order Family Tree (Table View + Cards View)
-// ✅ v2.2.12: سبب NCR (عامل/ماكينة/الرسم الهندسي/خامة) + اسم العامل
-// ✅ v2.2.12: قائمة نوع العطل في Downtime (ماكينة/خامة/عامل/لوحة) + اسم العامل
-// ✅ v2.2.11: حقول بحث في NCR لقوائم Work Order و Item
-// ✅ v2.2.10: إلغاء Galvanizing + جعل Finish آخر عملية
+// ✅ v2.4.1: زر «Add Daily Production» في قسم الإنتاج اليدوي — لوحة الإدخال
+//           اليدوي مخفية افتراضياً وتُفتح بالزر (بنفس نمط Models/WO/Downtime/NCR)
+//           مع تكامل مع لوحة Excel: فتح إحداهما يُغلق الأخرى.
+// ✅ v2.4.0: Daily Production Import from Excel — طريقة إضافية لإدخال الإنتاج
+//           اليومي عبر ملف Excel مع أعمدة Machine / Shift / Operator تُملأ
+//           تلقائياً بناءً على نوع العملية التشغيلية (getMachineForOperation).
+// ✅ v2.3.1: لوحات الإدخال مخفية افتراضياً
+// ✅ v2.3.0: Sales Order Family Tree
+// ✅ v2.2.14: Chart View لـ Sales Order Family Tree
+// ✅ v2.2.13: Sales Order Family Tree (Table + Cards View)
+// ✅ v2.2.12: سبب NCR + اسم العامل + نوع العطل في Downtime
+// ✅ v2.2.11: بحث NCR
+// ✅ v2.2.10: إلغاء Galvanizing + Finish آخر عملية
 // ✅ v2.2.9:  completedQuantity = الحد الأدنى بين العمليات (bottleneck)
 // ============================================================================
 
@@ -45,7 +49,7 @@ const STATUS = {
 };
 
 let appConfig = {
-    version: '2.2.14',
+    version: '2.4.1',
     settings: {},
     lastBackup: null,
     backupSchedule: 'none'
@@ -58,6 +62,7 @@ let currentWorkOrder = null;
 let currentProduction = null;
 let currentExcelData = null;
 let currentWorkOrderData = null;
+let currentProductionExcelData = null;   // ✅ v2.4.0 — Excel rows buffer for production import
 let pendingDeleteAction = null;
 let pendingDeleteData = null;
 let allItemsForReport = [];
@@ -283,15 +288,14 @@ function hasPermission(permission) {
     return perms && perms[permission] === true;
 }
 
-// ============= ENTRY PANELS — لوحات الإدخال (تُفتح بزر «جديد») =============
-// نماذج الإدخال في (Models / Work Order / Downtime / NCR) مخفية افتراضياً لإتاحة كامل الشاشة للقوائم.
-// اجعل القيمة false إن أردت إبقاء اللوحة مفتوحة بعد الحفظ (مثلاً لإدخال عدة سجلات متتالية).
+// ============= ENTRY PANELS =============
 const ENTRY_PANEL_AUTO_CLOSE = true;
 const ENTRY_PANELS = {
-    models:    { panel: 'modelsEntryPanel',    btn: 'modelsNewBtn',    permission: 'canCreateModel',     focus: 'towerType' },
-    workOrder: { panel: 'workOrderEntryPanel', btn: 'workOrderNewBtn', permission: 'canCreateWorkOrder', focus: 'workOrderName' },
-    downtime:  { panel: 'downtimeEntryPanel',  btn: 'downtimeNewBtn',  permission: 'canRecordDowntime',  focus: 'downtimeShift' },
-    ncr:       { panel: 'ncrEntryPanel',       btn: 'ncrNewBtn',       permission: 'canRecordNCR',       focus: 'ncrShift' }
+    models:    { panel: 'modelsEntryPanel',     btn: 'modelsNewBtn',     permission: 'canCreateModel',      focus: 'towerType' },
+    workOrder: { panel: 'workOrderEntryPanel',  btn: 'workOrderNewBtn',  permission: 'canCreateWorkOrder',  focus: 'workOrderName' },
+    production:{ panel: 'productionEntryPanel', btn: 'productionNewBtn', permission: 'canRecordProduction', focus: 'productionTowerType' },
+    downtime:  { panel: 'downtimeEntryPanel',   btn: 'downtimeNewBtn',   permission: 'canRecordDowntime',   focus: 'downtimeShift' },
+    ncr:       { panel: 'ncrEntryPanel',        btn: 'ncrNewBtn',        permission: 'canRecordNCR',        focus: 'ncrShift' }
 };
 
 function setEntryPanelState(key, open) {
@@ -334,7 +338,6 @@ function toggleEntryPanel(key) {
     if (panel && !panel.classList.contains('hidden')) closeEntryPanel(key); else openEntryPanel(key);
 }
 
-// إخفاء زر «جديد» (وإغلاق اللوحة) عند غياب صلاحية الإدخال
 function syncEntryPanelPermission(key) {
     const cfg = ENTRY_PANELS[key];
     if (!cfg) return;
@@ -342,6 +345,20 @@ function syncEntryPanelPermission(key) {
     const btn = document.getElementById(cfg.btn);
     if (btn) btn.style.display = allowed ? '' : 'none';
     if (!allowed) closeEntryPanel(key);
+}
+
+// ✅ v2.4.1 — Toggle manual production form panel; closes Excel panel when opening
+function toggleProductionEntryPanel() {
+    const panel = document.getElementById('productionEntryPanel');
+    if (!panel) return;
+    const isOpening = panel.classList.contains('hidden');
+    toggleEntryPanel('production');
+    if (isOpening) {
+        const excelPanel = document.getElementById('productionExcelPanel');
+        if (excelPanel && !excelPanel.classList.contains('hidden')) {
+            toggleProductionExcelPanel();
+        }
+    }
 }
 
 function applyPermissionsToCurrentSection() {
@@ -360,10 +377,13 @@ function applyPermissionsToCurrentSection() {
             syncEntryPanelPermission('workOrder');
             break;
         case 'productionSection':
-            const prodForm = document.querySelector('#productionSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
+            const prodForm = document.querySelector('#productionEntryPanel form#productionForm');
             if (prodForm) prodForm.style.display = hasPermission('canRecordProduction') ? '' : 'none';
             const manageOpsBtn = document.querySelector('#productionSection button[onclick="showOperatorsManagement()"]');
             if (manageOpsBtn) manageOpsBtn.style.display = hasPermission('canManageOperators') ? '' : 'none';
+            const excelBtn = document.getElementById('productionExcelToggleBtn');
+            if (excelBtn) excelBtn.style.display = hasPermission('canRecordProduction') ? '' : 'none';
+            syncEntryPanelPermission('production');
             break;
         case 'downtimeSection':
             const dtForm = document.querySelector('#downtimeSection .card:first-child .card-body .grid .lg\\:col-span-2 form');
@@ -871,7 +891,7 @@ const translations = {
         models: "Models ", items: "Items ", savedModels: "Saved Models ", searchModel: "Search model... ",
         noSavedModels: "No saved models. ", modelDetails: "Model Details ", close: "Close ",
         createNewWorkOrder: "Create New Work Order ",
-        newModelBtn: "New Model", newWorkOrderBtn: "New Work Order", newDowntimeBtn: "New Downtime", newNCRBtn: "New NCR",
+        newModelBtn: "New Model", newWorkOrderBtn: "New Work Order", newDowntimeBtn: "New Downtime", newNCRBtn: "New NCR", newProductionBtn: "Add Daily Production",
         workOrdersManagement: "Work Orders Management", workOrderName: "Work Order Name ",
         projectName: "Project Name ", salesOrderNumber: "Sales Order Number ", uploadWorkOrderFile: "Upload Work Order File ",
         createWorkOrder: "Create Work Order ", notes: "Notes ", selectExistingModel: "Select existing model from database ",
@@ -1021,7 +1041,7 @@ const translations = {
         models: "نماذج ", items: "بنود ", savedModels: "النماذج المحفوظة ", searchModel: "بحث في النماذج... ",
         noSavedModels: "لا توجد نماذج محفوظة. ", modelDetails: "تفاصيل النموذج ", close: "إغلاق ",
         createNewWorkOrder: "إنشاء أمر عمل جديد ",
-        newModelBtn: "نموذج جديد", newWorkOrderBtn: "أمر عمل جديد", newDowntimeBtn: "تسجيل توقف جديد", newNCRBtn: "تسجيل عدم مطابقة جديد",
+        newModelBtn: "نموذج جديد", newWorkOrderBtn: "أمر عمل جديد", newDowntimeBtn: "تسجيل توقف جديد", newNCRBtn: "تسجيل عدم مطابقة جديد", newProductionBtn: "إضافة إنتاج يومي",
         workOrdersManagement: "إدارة أوامر العمل", workOrderName: "اسم أمر العمل ",
         projectName: "اسم المشروع ", salesOrderNumber: "رقم أمر المبيعات ", uploadWorkOrderFile: "رفع ملف أمر العمل ",
         createWorkOrder: "إنشاء أمر العمل ", notes: "ملاحظات ", selectExistingModel: "اختر نموذجاً من قاعدة البيانات ",
@@ -1592,7 +1612,6 @@ function renderDashboardMonthlyReport() {
 
 // ============================================================================
 // ✅ SALES ORDER FAMILY TREE v2.3.0 — شجرة عائلة أوامر البيع
-//    جدول شجري قابل للطيّ + مؤشرات علوية + تنبيه التأخير + بحث وفرز
 // ============================================================================
 const SO_TREE_SETTINGS_KEY = 'soTreeDelaySettings';
 const SO_TREE_DAY_MS = 86400000;
@@ -1608,19 +1627,17 @@ function soTreeT(key, fallback) {
     return (t[key] || fallback || '').toString().trim();
 }
 
-// ---------- إعدادات التأخير (محفوظة محلياً) ----------
 function soTreeLoadSettings() {
     try {
         const s = JSON.parse(localStorage.getItem(SO_TREE_SETTINGS_KEY) || 'null');
         if (s && Number(s.days) > 0) return { days: Math.round(Number(s.days)), basis: s.basis === 'idle' ? 'idle' : 'age' };
-    } catch (e) { /* ignore */ }
+    } catch (e) { }
     return { days: 30, basis: 'age' };
 }
 function soTreeSaveSettings(days, basis) {
-    try { localStorage.setItem(SO_TREE_SETTINGS_KEY, JSON.stringify({ days, basis })); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(SO_TREE_SETTINGS_KEY, JSON.stringify({ days, basis })); } catch (e) { }
 }
 
-// ---------- أدوات التاريخ ----------
 function soTreeDaysSince(ms) {
     if (!ms || isNaN(ms)) return null;
     return Math.max(0, Math.floor((Date.now() - ms) / SO_TREE_DAY_MS));
@@ -1634,7 +1651,6 @@ function soTreeParseDate(str) {
 }
 function soTreeFmtDate(ms) { return ms ? getLocalDateStr(new Date(ms)) : ''; }
 
-// آخر نشاط إنتاجي لكل أمر شغل (من سجلات الإنتاج)
 function soTreeBuildLastActivityMap() {
     const m = new Map();
     (productionDB || []).forEach(r => {
@@ -1661,7 +1677,6 @@ function soTreeDelayInfo(wo, isActive, lastAct, days, basis) {
     return { created, ageDays, idleDays, metric, level };
 }
 
-// ---------- تجميع البيانات ----------
 function soTreeCollectBuckets() {
     const st = soTreeState;
     const q = (st.search || '').trim().toLowerCase();
@@ -1748,7 +1763,6 @@ function soTreeSortBuckets(buckets, sort) {
     return arr;
 }
 
-// ---------- عناصر العرض المشتركة ----------
 const soTreeFmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
 const soTreeFmtTon = (kg) => ((Number(kg) || 0) / 1000).toFixed(2);
 
@@ -1801,7 +1815,6 @@ function soTreeSoAlertHtml(b) {
     return '<span class="so-badge so-badge-ok">On track</span>';
 }
 
-// ---------- المؤشرات العلوية ----------
 function soTreeKpiHtml(buckets) {
     const st = soTreeState;
     const sum = (k) => buckets.reduce((s, b) => s + b[k], 0);
@@ -1855,7 +1868,6 @@ function soTreeToolbarHtml() {
     </div>`;
 }
 
-// ---------- التوليد (نقطة الدخول من النموذج) ----------
 function generateSalesOrderTree() {
     if (!hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض التقارير', 'error'); return; }
     const st = soTreeState;
@@ -1869,7 +1881,6 @@ function generateSalesOrderTree() {
     st.basis = (document.getElementById('treeDelayBasis')?.value || saved.basis) === 'idle' ? 'idle' : 'age';
     soTreeSaveSettings(st.delayDays, st.basis);
 
-    // الوضع الافتراضي للطيّ: مفتوح إذا كان العرض محدوداً، مطويّ إذا كان كبيراً
     const preview = soTreeCollectBuckets();
     const expandAll = !!st.soFilter || st.statusFilter === 'delayed' || preview.length <= 3;
     st.expanded = new Set(expandAll ? preview.map(b => b.salesOrder) : []);
@@ -1884,7 +1895,6 @@ function generateSalesOrderTree() {
     showToast('Sales Order family tree generated', 'success');
 }
 
-// إعادة الرسم (بعد البحث أو الفرز) دون إعادة بناء شريط الأدوات
 function soTreeRefresh() {
     const st = soTreeState;
     const buckets = soTreeCollectBuckets();
@@ -1905,7 +1915,6 @@ function soTreeRefresh() {
     else soTreeRenderDetail(buckets, header, body);
 }
 
-// ---------- العرض التفصيلي (شجري قابل للطيّ) ----------
 function soTreeRenderDetail(buckets, header, body) {
     const st = soTreeState;
     const searching = !!(st.search || '').trim();
@@ -1977,7 +1986,6 @@ function soTreeRenderDetail(buckets, header, body) {
     body.innerHTML = html;
 }
 
-// ---------- العرض الملخّص (صف لكل أمر بيع) ----------
 function soTreeRenderSummary(buckets, header, body) {
     header.innerHTML = `<tr>
         <th style="width:22%">Sales Order</th><th>Project(s)</th><th>WOs (Finished/Total)</th><th>Items</th>
@@ -2011,7 +2019,6 @@ function soTreeRenderSummary(buckets, header, body) {
     body.innerHTML = html;
 }
 
-// صف الإجمالي (يظهر في Excel/PDF/الطباعة)
 function soTreeTotalRow(buckets, cols, detail) {
     const sum = (k) => buckets.reduce((s, b) => s + b[k], 0);
     const totalWt = sum('totalWeight'), doneWt = sum('completedWeight');
@@ -2030,7 +2037,6 @@ function soTreeTotalRow(buckets, cols, detail) {
         <td></td><td></td><td class="text-center">${alert}</td></tr>`;
 }
 
-// ---------- التفاعل ----------
 function soTreeApplyExpansion() {
     const st = soTreeState;
     const searching = !!(st.search || '').trim();
@@ -2906,6 +2912,364 @@ function canMachineDoOperation(machine, opName, section) {
     if (machine === 'Chamfering') return op.includes('chamfer');
     if (machine === 'Finishing') return op.includes('finish');
     return false;
+}
+
+// ============================================================================
+// ✅ v2.4.0 — DAILY PRODUCTION IMPORT FROM EXCEL
+// ✅ v2.4.1 — Updated to coordinate with manual entry panel
+// ============================================================================
+
+function toggleProductionExcelPanel() {
+    const panel = document.getElementById('productionExcelPanel');
+    const btn = document.getElementById('productionExcelToggleBtn');
+    if (!panel) return;
+    const willOpen = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !willOpen);
+    if (btn) {
+        btn.classList.toggle('btn-warning', !willOpen);
+        btn.classList.toggle('btn-outline', willOpen);
+    }
+    if (willOpen) {
+        // ✅ v2.4.1 — close the manual entry panel if it was open
+        const entryPanel = document.getElementById('productionEntryPanel');
+        if (entryPanel && !entryPanel.classList.contains('hidden')) {
+            toggleEntryPanel('production');
+        }
+    }
+    if (!willOpen) {
+        const input = document.getElementById('productionExcelFile');
+        const fn = document.getElementById('productionExcelFileName');
+        if (input) input.value = '';
+        if (fn) fn.classList.add('hidden');
+        currentProductionExcelData = null;
+    }
+}
+
+function handleProductionExcelSelect(e) {
+    const file = e.target.files[0];
+    const fn = document.getElementById('productionExcelFileName');
+    if (!file) return;
+    if (fn) {
+        fn.textContent = `✔ File loaded: ${file.name}`;
+        fn.classList.remove('hidden');
+    }
+    const reader = new FileReader();
+    reader.onload = function (ev) {
+        try {
+            const data = new Uint8Array(ev.target.result);
+            const wb = XLSX.read(data, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            currentProductionExcelData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+            const rows = Math.max(0, currentProductionExcelData.length - 1);
+            showToast(`✅ Excel loaded — ${rows} data row(s) detected`, 'success');
+        } catch (err) {
+            console.error('Excel read error:', err);
+            showToast('فشل قراءة ملف الإكسل: ' + err.message, 'error');
+            currentProductionExcelData = null;
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function downloadProductionExcelTemplate() {
+    const today = getLocalDateStr();
+    const firstWO = workOrdersDB.find(w => !w.archived && w.items && w.items.length > 0);
+
+    let sampleWO = 'WO-2024-001';
+    let sampleItem = 'A1';
+    let sampleSection = 'L';
+    let sampleOp = 'Minimum';
+    let sampleMachine = '206';
+
+    if (firstWO) {
+        sampleWO = firstWO.workOrderName;
+        const firstItem = firstWO.items[0];
+        sampleItem = firstItem.itemName || sampleItem;
+        sampleSection = firstItem.section || sampleSection;
+        if (firstItem.operations && firstItem.operations[0]) {
+            sampleOp = firstItem.operations[0].name || sampleOp;
+            const mi = getMachineForOperation(sampleOp, sampleSection);
+            sampleMachine = mi.machine;
+            if (sampleMachine === "206/20.20/10.10") sampleMachine = "206";
+        }
+    }
+
+    const template = [
+        ['Work Order', 'Item Name', 'Operation', 'Quantity', 'Machine', 'Shift', 'Operator', 'Rejected Qty', 'Date'],
+        [sampleWO, sampleItem, sampleOp, 10, sampleMachine, 'First Shift',  'Excel Import', 0, today],
+        [sampleWO, sampleItem, sampleOp, 5,  sampleMachine, 'Second Shift', 'Excel Import', 0, today]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(template);
+    ws['!cols'] = [
+        { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 10 },
+        { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 12 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Production');
+    XLSX.writeFile(wb, `production_template_${today}.xlsx`);
+    showToast('✅ Template downloaded — Machine/Shift/Operator are prefilled per operation', 'success');
+}
+
+function _findProdColIndex(headerRow, patterns, excludePatterns = []) {
+    if (!Array.isArray(headerRow)) return -1;
+    return headerRow.findIndex(h => {
+        if (h === undefined || h === null) return false;
+        const hs = String(h).toLowerCase().trim();
+        if (!hs) return false;
+        const matched = patterns.some(p => hs.includes(String(p).toLowerCase()));
+        if (!matched) return false;
+        const excluded = excludePatterns.some(p => hs.includes(String(p).toLowerCase()));
+        return !excluded;
+    });
+}
+
+function _normalizeExcelDate(val) {
+    if (val === undefined || val === null || val === '') return null;
+    if (val instanceof Date) return getLocalDateStr(val);
+    if (typeof val === 'number') {
+        const excelEpoch = new Date(1899, 11, 30);
+        return getLocalDateStr(new Date(excelEpoch.getTime() + val * 86400000));
+    }
+    const str = String(val).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return getLocalDateStr(d);
+    return null;
+}
+
+async function processProductionExcel() {
+    if (!hasPermission('canRecordProduction')) {
+        showToast('غير مسموح لك بتسجيل الإنتاج', 'error');
+        return;
+    }
+    if (!currentProductionExcelData || currentProductionExcelData.length < 1) {
+        showToast('الرجاء رفع ملف Excel أولاً', 'warning');
+        return;
+    }
+
+    showLoading('Processing production records...');
+    await yieldToUI();
+
+    try {
+        const headerRow = (currentProductionExcelData[0] || []).map(c => c === undefined ? '' : c);
+
+        const headerText = headerRow.map(c => String(c || '').toLowerCase()).join(' ');
+        const looksLikeHeader =
+            headerText.includes('work') || headerText.includes('item') ||
+            headerText.includes('operation') || headerText.includes('qty') ||
+            headerText.includes('quantity') || headerText.includes('shift') ||
+            headerText.includes('machine') || headerText.includes('operator') ||
+            headerText.includes('أمر العمل') || headerText.includes('البند') ||
+            headerText.includes('العملية') || headerText.includes('الكمية') ||
+            headerText.includes('الماكينة') || headerText.includes('الوردية') || headerText.includes('العامل');
+
+        let colMap = {
+            wo:        _findProdColIndex(headerRow, ['work order', 'workorder', 'wo', 'أمر العمل']),
+            item:      _findProdColIndex(headerRow, ['item', 'part', 'البند']),
+            operation: _findProdColIndex(headerRow, ['operation', 'process', 'العملية']),
+            quantity:  _findProdColIndex(headerRow, ['quantity', 'qty', 'produced', 'الكمية'], ['reject', 'مرفوض']),
+            machine:   _findProdColIndex(headerRow, ['machine', 'ماكينة', 'الماكينة']),
+            shift:     _findProdColIndex(headerRow, ['shift', 'الوردية']),
+            operator:  _findProdColIndex(headerRow, ['operator', 'worker', 'العامل']),
+            rejected:  _findProdColIndex(headerRow, ['reject', 'مرفوض', 'تالف']),
+            date:      _findProdColIndex(headerRow, ['date', 'التاريخ']),
+        };
+
+        if (colMap.wo < 0) colMap.wo = 0;
+        if (colMap.item < 0) colMap.item = 1;
+        if (colMap.operation < 0) colMap.operation = 2;
+        if (colMap.quantity < 0) colMap.quantity = 3;
+
+        const startRow = looksLikeHeader ? 1 : 0;
+        const today = getLocalDateStr();
+        const validMachines = ['206', '20.20', '10.10', 'Cropping', 'Manual Plasma',
+            'Press', 'Drill', 'Chamfering', 'Shear', '83P', 'CNC Bending', 'Finishing'];
+
+        const results = { success: 0, failed: 0, errors: [] };
+
+        for (let i = startRow; i < currentProductionExcelData.length; i++) {
+            const row = currentProductionExcelData[i];
+            if (!row || !row.some(c => c !== undefined && c !== null && String(c).trim() !== '')) continue;
+
+            try {
+                const woName    = String(row[colMap.wo] || '').trim();
+                const itemName  = String(row[colMap.item] || '').trim();
+                const operation = String(row[colMap.operation] || '').trim();
+                const rawQty    = row[colMap.quantity];
+                const quantity  = parseInt(String(rawQty).replace(/[^\d-]/g, '')) || 0;
+                const rejectedQty = colMap.rejected >= 0
+                    ? (parseInt(String(row[colMap.rejected]).replace(/[^\d-]/g, '')) || 0)
+                    : 0;
+
+                const machineFromExcel  = colMap.machine  >= 0 ? String(row[colMap.machine]  || '').trim() : '';
+                const shiftFromExcel    = colMap.shift    >= 0 ? String(row[colMap.shift]    || '').trim() : '';
+                const operatorFromExcel = colMap.operator >= 0 ? String(row[colMap.operator] || '').trim() : '';
+                const date = (colMap.date >= 0 ? _normalizeExcelDate(row[colMap.date]) : null) || today;
+
+                if (!woName || !itemName || !operation || quantity <= 0) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: بيانات ناقصة (WO / Item / Operation / Qty)`);
+                    continue;
+                }
+                if (rejectedQty < 0) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: كمية المرفوض سالبة`);
+                    continue;
+                }
+
+                let wo = workOrdersDB.find(w => w.workOrderName === woName);
+                if (!wo) wo = workOrdersDB.find(w => String(w.id) === woName);
+                if (!wo) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: أمر الشغل "${woName}" غير موجود`);
+                    continue;
+                }
+                if (wo.archived) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: أمر الشغل "${woName}" مؤرشف`);
+                    continue;
+                }
+
+                const item = wo.items.find(it => it.itemName === itemName);
+                if (!item) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: البند "${itemName}" غير موجود في ${woName}`);
+                    continue;
+                }
+
+                const op = item.operations.find(o => o.name.toLowerCase() === operation.toLowerCase())
+                        || item.operations.find(o => o.name.toLowerCase().includes(operation.toLowerCase()));
+                if (!op) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: العملية "${operation}" غير موجودة في البند "${itemName}"`);
+                    continue;
+                }
+
+                const completed = (item.completedOperations[op.name] && item.completedOperations[op.name].completedQuantity) || 0;
+                const remaining = item.quantity - completed;
+                if (remaining <= 0) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: العملية "${op.name}" مكتملة بالفعل`);
+                    continue;
+                }
+
+                const validQty = Math.min(quantity, remaining);
+                const capped = validQty < quantity;
+
+                if (rejectedQty > validQty) {
+                    results.failed++;
+                    results.errors.push(`Row ${i + 1}: المرفوض (${rejectedQty}) أكبر من الكمية (${validQty})`);
+                    continue;
+                }
+
+                // ✅ Machine: من الإكسل إن وُجدت، وإلا تُشتق من نوع العملية
+                let machine;
+                if (machineFromExcel) {
+                    machine = machineFromExcel;
+                } else {
+                    const mi = getMachineForOperation(op.name, item.section);
+                    machine = mi.machine;
+                    if (machine === "206/20.20/10.10") machine = "206";
+                }
+                if (machineFromExcel && !validMachines.includes(machineFromExcel)) {
+                    console.warn(`Row ${i + 1}: ماكينة غير معروفة "${machineFromExcel}" — تم قبولها كما هي`);
+                }
+
+                const shift    = shiftFromExcel    || 'First Shift';
+                const operator = operatorFromExcel || 'Excel Import';
+
+                const goodQty = validQty - rejectedQty;
+                const prodWeight = Math.round((item.weightPerPiece || 0) * goodQty);
+
+                productionDB.push({
+                    id: Date.now() + Math.random(),
+                    workOrderId: wo.id,
+                    workOrderName: wo.workOrderName,
+                    projectName: wo.projectName,
+                    towerType: wo.type,
+                    model: wo.model,
+                    shift, machine, operator, date,
+                    itemName: item.itemName,
+                    itemSection: item.section,
+                    operation: op.name,
+                    quantity: validQty,
+                    rejectedQty,
+                    producedWeight: prodWeight,
+                    weightPerPiece: item.weightPerPiece || 0,
+                    totalItemWeight: item.totalWeight || 0,
+                    notes: 'Imported from Excel'
+                        + (capped ? ` (capped from ${quantity})` : '')
+                        + (!machineFromExcel ? ' [machine auto-derived]' : ''),
+                    timestamp: Date.now(),
+                    recordedBy: currentUser ? currentUser.username : 'system'
+                });
+
+                if (!item.completedOperations[op.name]) {
+                    item.completedOperations[op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
+                }
+                item.completedOperations[op.name].completedQuantity += validQty;
+                if (item.completedOperations[op.name].completedQuantity >= item.quantity) {
+                    item.completedOperations[op.name].completed = true;
+                }
+
+                item.completedQuantity = recalcItemCompletedQuantity(item);
+                recalcItemStatus(item);
+
+                results.success++;
+            } catch (rowErr) {
+                results.failed++;
+                results.errors.push(`Row ${i + 1}: ${rowErr.message}`);
+            }
+        }
+
+        if (results.success > 0) {
+            const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
+            if (!woSaveResult || !woSaveResult.success) {
+                hideLoading();
+                showToast('تعذّر حفظ تحديث أوامر الشغل على الخادم.', 'error');
+                return;
+            }
+            await flushNewProductionRecords();
+            await updateIdealRatesFromActual();
+
+            updateStats();
+            renderProductionList();
+            renderWorkOrdersList();
+            renderDashboard();
+        }
+
+        hideLoading();
+
+        let msg = `✅ Imported ${results.success} record(s)`;
+        if (results.failed > 0) msg += ` | ⚠️ Failed: ${results.failed}`;
+        showToast(msg, results.success > 0 ? 'success' : 'error');
+
+        if (results.errors.length > 0) {
+            console.warn('Production Excel import errors:');
+            results.errors.forEach(e => console.warn(e));
+            if (results.success === 0) {
+                alert('Import failed:\n\n' + results.errors.slice(0, 15).join('\n')
+                    + (results.errors.length > 15 ? '\n... (see console)' : ''));
+            } else if (results.failed > 0) {
+                alert(`تم استيراد ${results.success} سجل بنجاح.\nتعذّر استيراد ${results.failed} سجل:\n\n`
+                    + results.errors.slice(0, 10).join('\n'));
+            }
+        }
+
+        if (results.success > 0) {
+            const input = document.getElementById('productionExcelFile');
+            const fn = document.getElementById('productionExcelFileName');
+            if (input) input.value = '';
+            if (fn) fn.classList.add('hidden');
+            currentProductionExcelData = null;
+        }
+
+    } catch (err) {
+        hideLoading();
+        console.error('processProductionExcel error:', err);
+        showToast('Error processing Excel: ' + err.message, 'error');
+    }
 }
 
 async function recordProduction() {

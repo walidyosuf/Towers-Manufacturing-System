@@ -1,5 +1,9 @@
-// renderer.js - Tower Manufacturing Management System v2.4.1
+// renderer.js - Tower Manufacturing Management System v2.4.2
 // ============================================================================
+// ✅ v2.4.2: إصلاح Balance Mode — عند إدخال عملية Finish مع تفعيل Balance
+//           تُكمل جميع العمليات السابقة تلقائياً بعامل "Balance" (بما فيها
+//           عبر استيراد Excel حيث Balance Mode مفعّل دائمًا). حفظ ذرّي واحد
+//           + دفع كل سجلات الإنتاج في دفعة واحدة + تحديث فوري للواجهة.
 // ✅ v2.4.1: زر «Add Daily Production» في قسم الإنتاج اليدوي — لوحة الإدخال
 //           اليدوي مخفية افتراضياً وتُفتح بالزر (بنفس نمط Models/WO/Downtime/NCR)
 //           مع تكامل مع لوحة Excel: فتح إحداهما يُغلق الأخرى.
@@ -49,7 +53,7 @@ const STATUS = {
 };
 
 let appConfig = {
-    version: '2.4.1',
+    version: '2.4.2',
     settings: {},
     lastBackup: null,
     backupSchedule: 'none'
@@ -62,7 +66,7 @@ let currentWorkOrder = null;
 let currentProduction = null;
 let currentExcelData = null;
 let currentWorkOrderData = null;
-let currentProductionExcelData = null;   // ✅ v2.4.0 — Excel rows buffer for production import
+let currentProductionExcelData = null;
 let pendingDeleteAction = null;
 let pendingDeleteData = null;
 let allItemsForReport = [];
@@ -1611,7 +1615,7 @@ function renderDashboardMonthlyReport() {
 }
 
 // ============================================================================
-// ✅ SALES ORDER FAMILY TREE v2.3.0 — شجرة عائلة أوامر البيع
+// ✅ SALES ORDER FAMILY TREE v2.3.0
 // ============================================================================
 const SO_TREE_SETTINGS_KEY = 'soTreeDelaySettings';
 const SO_TREE_DAY_MS = 86400000;
@@ -2917,6 +2921,7 @@ function canMachineDoOperation(machine, opName, section) {
 // ============================================================================
 // ✅ v2.4.0 — DAILY PRODUCTION IMPORT FROM EXCEL
 // ✅ v2.4.1 — Updated to coordinate with manual entry panel
+// ✅ v2.4.2 — Balance Mode ALWAYS ACTIVE during Excel import
 // ============================================================================
 
 function toggleProductionExcelPanel() {
@@ -2930,7 +2935,6 @@ function toggleProductionExcelPanel() {
         btn.classList.toggle('btn-outline', willOpen);
     }
     if (willOpen) {
-        // ✅ v2.4.1 — close the manual entry panel if it was open
         const entryPanel = document.getElementById('productionEntryPanel');
         if (entryPanel && !entryPanel.classList.contains('hidden')) {
             toggleEntryPanel('production');
@@ -3086,7 +3090,7 @@ async function processProductionExcel() {
         const validMachines = ['206', '20.20', '10.10', 'Cropping', 'Manual Plasma',
             'Press', 'Drill', 'Chamfering', 'Shear', '83P', 'CNC Bending', 'Finishing'];
 
-        const results = { success: 0, failed: 0, errors: [] };
+        const results = { success: 0, failed: 0, autoCompleted: 0, errors: [] };
 
         for (let i = startRow; i < currentProductionExcelData.length; i++) {
             const row = currentProductionExcelData[i];
@@ -3179,6 +3183,67 @@ async function processProductionExcel() {
                 const shift    = shiftFromExcel    || 'First Shift';
                 const operator = operatorFromExcel || 'Excel Import';
 
+                // ============================================================
+                // ✅ v2.4.2 — Balance Mode دائم التفعيل عند الاستيراد من Excel
+                //    إكمال كل العمليات السابقة (index < index العملية الحالية)
+                // ============================================================
+                const currentOpIndex = item.operations.findIndex(o => o.name === op.name);
+                const targetNorm = String(op.name || '').trim().toLowerCase();
+                const autoCompletedOps = [];
+
+                if (currentOpIndex > 0) {
+                    for (let oi = 0; oi < currentOpIndex; oi++) {
+                        const otherOp = item.operations[oi];
+                        const otherNorm = String(otherOp.name || '').trim().toLowerCase();
+                        if (otherNorm === targetNorm) continue;
+
+                        const otherComp = (item.completedOperations[otherOp.name] && item.completedOperations[otherOp.name].completedQuantity) || 0;
+                        const remainingOther = item.quantity - otherComp;
+                        if (remainingOther <= 0) continue;
+
+                        autoCompletedOps.push({ op: otherOp, remainingQty: remainingOther });
+                    }
+                }
+
+                // (1) تطبيق الإكمال في الذاكرة
+                for (const entry of autoCompletedOps) {
+                    if (!item.completedOperations[entry.op.name]) {
+                        item.completedOperations[entry.op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
+                    }
+                    item.completedOperations[entry.op.name].completedQuantity = item.quantity;
+                    item.completedOperations[entry.op.name].completed = true;
+                }
+
+                // (2) إنشاء سجلات إنتاج للعمليات التي أكملها Balance
+                for (const entry of autoCompletedOps) {
+                    const mi = getMachineForOperation(entry.op.name, item.section);
+                    let otherMachine = mi.machine;
+                    if (otherMachine === "206/20.20/10.10") otherMachine = "206";
+                    productionDB.push({
+                        id: Date.now() + Math.random(),
+                        workOrderId: wo.id,
+                        workOrderName: wo.workOrderName,
+                        projectName: wo.projectName,
+                        towerType: wo.type,
+                        model: wo.model,
+                        shift, machine: otherMachine, operator: "Balance", date,
+                        itemName: item.itemName,
+                        itemSection: item.section,
+                        operation: entry.op.name,
+                        quantity: entry.remainingQty,
+                        rejectedQty: 0,
+                        producedWeight: Math.round((item.weightPerPiece || 0) * entry.remainingQty),
+                        weightPerPiece: item.weightPerPiece || 0,
+                        totalItemWeight: item.totalWeight || 0,
+                        notes: `Balance Mode (Excel import): auto-completed — triggered by "${op.name}" entry`,
+                        timestamp: Date.now(),
+                        recordedBy: currentUser ? currentUser.username : 'system'
+                    });
+                    results.autoCompleted++;
+                }
+                // ============================================================
+
+                // (3) سجل إنتاج العملية الحالية
                 const goodQty = validQty - rejectedQty;
                 const prodWeight = Math.round((item.weightPerPiece || 0) * goodQty);
 
@@ -3205,6 +3270,7 @@ async function processProductionExcel() {
                     recordedBy: currentUser ? currentUser.username : 'system'
                 });
 
+                // (4) تحديث العملية الحالية في أمر الشغل
                 if (!item.completedOperations[op.name]) {
                     item.completedOperations[op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
                 }
@@ -3223,6 +3289,7 @@ async function processProductionExcel() {
             }
         }
 
+        // حفظ موحّد + دفع كل سجلات الإنتاج الجديدة (بما فيها Balance)
         if (results.success > 0) {
             const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
             if (!woSaveResult || !woSaveResult.success) {
@@ -3237,11 +3304,16 @@ async function processProductionExcel() {
             renderProductionList();
             renderWorkOrdersList();
             renderDashboard();
+
+            if (currentWorkOrder && workOrdersDB.some(w => w.id === currentWorkOrder.id)) {
+                try { showWorkOrderDetails(currentWorkOrder.id); } catch (e) { /* ignore */ }
+            }
         }
 
         hideLoading();
 
         let msg = `✅ Imported ${results.success} record(s)`;
+        if (results.autoCompleted > 0) msg += ` | 🔄 Balance auto-completed: ${results.autoCompleted}`;
         if (results.failed > 0) msg += ` | ⚠️ Failed: ${results.failed}`;
         showToast(msg, results.success > 0 ? 'success' : 'error');
 
@@ -3272,6 +3344,10 @@ async function processProductionExcel() {
     }
 }
 
+// ============================================================================
+// ✅ v2.4.2 — recordProduction with correct Balance Mode handling
+//             (single atomic save; previous ops auto-completed reliably)
+// ============================================================================
 async function recordProduction() {
     if (!hasPermission('canRecordProduction')) { showToast('غير مسموح لك بتسجيل الإنتاج', 'error'); return; }
     const towerType = document.getElementById('productionTowerType').value;
@@ -3288,102 +3364,145 @@ async function recordProduction() {
     if (!towerType || !model || !woId || !shift || !machine || !date || !operator) { showToast('Please fill all required fields', 'warning'); return; }
     if (selectedIdx === '') { showToast('Please select item', 'warning'); return; }
     if (rejectedQty > quantity) { showToast('Rejected quantity cannot exceed produced quantity', 'warning'); return; }
+
     const wo = workOrdersDB.find(w => w.id === parseInt(woId));
     if (!wo) { showToast('Work order not found', 'error'); return; }
     const item = wo.items[parseInt(selectedIdx)];
+    if (!item) { showToast('Item not found', 'error'); return; }
+
     const selOpt = document.getElementById('availableItemsSelect').selectedOptions[0];
     const opName = selOpt.getAttribute('data-operation');
+    if (!opName) { showToast('Could not determine operation. Please re-select the item.', 'error'); return; }
+
     const isSheet = item.section.toString().trim().toUpperCase().startsWith('P') || item.section.toString().trim().toUpperCase().startsWith('F');
+    const isShearCase = isSheet && machine === "Shear";
     const balanceModeActive = balanceMode && machine === 'Finishing';
     const opIsFinish = getOperationPhase(opName) === 'finish';
     const shouldCompleteOthers = balanceModeActive || opIsFinish;
-    let finalOperator = operator;
+    const finalOperator = operator;
 
-    if (shouldCompleteOthers) {
-        const currentOpIndex = item.operations.findIndex(op => op.name === opName);
-        let anyOtherCompleted = false;
-        for (let i = 0; i < item.operations.length; i++) {
-            if (i === currentOpIndex) continue;
-            const otherOp = item.operations[i];
-            if (otherOp.name === opName) continue;
-            const otherComp = item.completedOperations[otherOp.name] ? item.completedOperations[otherOp.name].completedQuantity : 0;
-            if (otherComp < item.quantity) {
-                const remainingOther = item.quantity - otherComp;
-                if (remainingOther > 0) {
-                    const otherMachineInfo = getMachineForOperation(otherOp.name, item.section);
-                    let otherMachine = otherMachineInfo.machine;
-                    if (otherMachine === "206/20.20/10.10") otherMachine = "206";
-                    const otherProdWeight = Math.round(item.weightPerPiece * remainingOther);
-                    const otherProdRec = {
-                        id: Date.now() + Math.random(),
-                        workOrderId: parseInt(woId), workOrderName: wo.workOrderName,
-                        projectName: wo.projectName, towerType, model, shift,
-                        machine: otherMachine, operator: "Balance", date,
-                        itemName: item.itemName, itemSection: item.section, operation: otherOp.name,
-                        quantity: remainingOther, rejectedQty: 0, producedWeight: otherProdWeight,
-                        weightPerPiece: item.weightPerPiece, totalItemWeight: item.totalWeight,
-                        notes: opIsFinish ? "Auto-completed because item marked as Finished" : "Auto-completed by Balance mode",
-                        timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
-                    };
-                    productionDB.push(otherProdRec);
-                    if (!item.completedOperations[otherOp.name]) item.completedOperations[otherOp.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
-                    item.completedOperations[otherOp.name].completedQuantity = item.quantity;
-                    item.completedOperations[otherOp.name].completed = true;
-                    anyOtherCompleted = true;
-                }
-            }
-        }
-        if (anyOtherCompleted) {
-            const otherFlush = await flushNewProductionRecords();
-            const otherSave = await saveToServer('workOrdersDB', workOrdersDB);
-            if (!otherFlush || !otherFlush.success || !otherSave || !otherSave.success) {
-                showToast('تعذّر حفظ إكمال العمليات الأخرى تلقائيًا على الخادم.', 'error');
-                return;
-            }
-            const msg = opIsFinish ? 'تم إكمال باقي العمليات تلقائياً' : 'تم إكمال العمليات الأخرى تلقائياً بواسطة Balance';
-            showToast(msg, 'info');
+    // STEP 1: Pre-validate CURRENT operation quantity BEFORE modifying anything
+    if (!isShearCase) {
+        const currentCompleted = (item.completedOperations[opName] && item.completedOperations[opName].completedQuantity) || 0;
+        const currentRemaining = item.quantity - currentCompleted;
+        if (quantity > currentRemaining) {
+            showToast(`Quantity exceeds remaining (${currentRemaining})`, 'warning');
+            return;
         }
     }
 
-    if (isSheet && machine === "Shear") {
-        if (!item.completedOperations[opName]) item.completedOperations[opName] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
-        else { item.completedOperations[opName].completedQuantity += quantity; if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true; }
+    // STEP 2: Determine which PREVIOUS operations need auto-completion
+    const autoCompletedOps = [];
+    if (shouldCompleteOthers) {
+        const targetNorm = String(opName || '').trim().toLowerCase();
+        for (let i = 0; i < item.operations.length; i++) {
+            const otherOp = item.operations[i];
+            const otherNorm = String(otherOp.name || '').trim().toLowerCase();
+            if (otherNorm === targetNorm) continue;
+            const otherCompleted = (item.completedOperations[otherOp.name] && item.completedOperations[otherOp.name].completedQuantity) || 0;
+            const remainingOther = item.quantity - otherCompleted;
+            if (remainingOther <= 0) continue;
+            autoCompletedOps.push({ op: otherOp, remainingQty: remainingOther });
+        }
+    }
+
+    // STEP 3: Apply auto-completion in memory
+    for (const entry of autoCompletedOps) {
+        if (!item.completedOperations[entry.op.name]) {
+            item.completedOperations[entry.op.name] = { completed: false, completedQuantity: 0, totalRequired: item.quantity };
+        }
+        item.completedOperations[entry.op.name].completedQuantity = item.quantity;
+        item.completedOperations[entry.op.name].completed = true;
+    }
+    if (autoCompletedOps.length > 0) {
+        console.log(`[Balance Mode] Auto-completed ${autoCompletedOps.length} previous operation(s) on item "${item.itemName}":`,
+            autoCompletedOps.map(e => `${e.op.name} (+${e.remainingQty})`).join(', '));
+    }
+
+    // STEP 4: Complete the CURRENT operation
+    if (isShearCase) {
+        if (!item.completedOperations[opName]) {
+            item.completedOperations[opName] = { completed: quantity >= item.quantity, completedQuantity: quantity, totalRequired: item.quantity };
+        } else {
+            item.completedOperations[opName].completedQuantity += quantity;
+            if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true;
+        }
         const cropOp = item.operations.find(op => op.name.toLowerCase().includes('crop'));
         if (cropOp && cropOp.name !== opName) {
-            if (!item.completedOperations[cropOp.name]) item.completedOperations[cropOp.name] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
-            else { item.completedOperations[cropOp.name].completedQuantity += quantity; if (item.completedOperations[cropOp.name].completedQuantity >= item.quantity) item.completedOperations[cropOp.name].completed = true; }
+            if (!item.completedOperations[cropOp.name]) {
+                item.completedOperations[cropOp.name] = { completed: quantity >= item.quantity, completedQuantity: quantity, totalRequired: item.quantity };
+            } else {
+                item.completedOperations[cropOp.name].completedQuantity += quantity;
+                if (item.completedOperations[cropOp.name].completedQuantity >= item.quantity) item.completedOperations[cropOp.name].completed = true;
+            }
         }
     } else {
-        const already = item.completedOperations[opName] ? item.completedOperations[opName].completedQuantity : 0;
-        const remaining = item.quantity - already;
-        if (quantity > remaining) { showToast(`Quantity exceeds remaining (${remaining})`, 'warning'); return; }
-        if (!item.completedOperations[opName]) item.completedOperations[opName] = { completed: false, completedQuantity: quantity, totalRequired: item.quantity };
-        else { item.completedOperations[opName].completedQuantity += quantity; if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true; }
+        if (!item.completedOperations[opName]) {
+            item.completedOperations[opName] = {
+                completed: quantity >= item.quantity,
+                completedQuantity: quantity,
+                totalRequired: item.quantity
+            };
+        } else {
+            item.completedOperations[opName].completedQuantity += quantity;
+            if (item.completedOperations[opName].completedQuantity >= item.quantity) item.completedOperations[opName].completed = true;
+        }
     }
 
+    // STEP 5: Recalculate item-level aggregates
     item.completedQuantity = recalcItemCompletedQuantity(item);
     recalcItemStatus(item);
 
+    // STEP 6: Save work order ONCE (atomic)
     const woIndex = workOrdersDB.findIndex(w => w.id === parseInt(woId));
     workOrdersDB[woIndex] = wo;
     const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
-    if (!woSaveResult || !woSaveResult.success) { showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
+    if (!woSaveResult || !woSaveResult.success) {
+        showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error');
+        return;
+    }
+
+    // STEP 7: Create production records for auto-completed previous ops (Balance)
+    for (const entry of autoCompletedOps) {
+        const mi = getMachineForOperation(entry.op.name, item.section);
+        let otherMachine = mi.machine;
+        if (otherMachine === "206/20.20/10.10") otherMachine = "206";
+        productionDB.push({
+            id: Date.now() + Math.random(),
+            workOrderId: parseInt(woId), workOrderName: wo.workOrderName,
+            projectName: wo.projectName, towerType, model, shift,
+            machine: otherMachine, operator: "Balance", date,
+            itemName: item.itemName, itemSection: item.section, operation: entry.op.name,
+            quantity: entry.remainingQty, rejectedQty: 0,
+            producedWeight: Math.round((item.weightPerPiece || 0) * entry.remainingQty),
+            weightPerPiece: item.weightPerPiece, totalItemWeight: item.totalWeight,
+            notes: opIsFinish
+                ? "Auto-completed because item marked as Finished"
+                : "Auto-completed by Balance mode",
+            timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
+        });
+    }
+
+    // STEP 8: Create production record for CURRENT (Finish) op
     const goodQuantity = quantity - rejectedQty;
-    const prodWeight = Math.round(item.weightPerPiece * goodQuantity);
-    const prodRec = {
+    productionDB.push({
         id: Date.now(),
         workOrderId: parseInt(woId), workOrderName: wo.workOrderName,
         projectName: wo.projectName, towerType, model, shift, machine,
         operator: finalOperator, date,
         itemName: item.itemName, itemSection: item.section, operation: opName,
-        quantity, rejectedQty, producedWeight: prodWeight,
+        quantity, rejectedQty,
+        producedWeight: Math.round((item.weightPerPiece || 0) * goodQuantity),
         weightPerPiece: item.weightPerPiece, totalItemWeight: item.totalWeight,
         notes: notes + (balanceModeActive ? " (Balance mode)" : ""),
         timestamp: Date.now(), recordedBy: currentUser ? currentUser.username : 'system'
-    };
-    productionDB.push(prodRec);
+    });
+
+    // STEP 9: Flush ALL new production records in one batch
     await flushNewProductionRecords();
     await saveProductionPreferences();
+
+    // STEP 10: Clear form fields
     document.getElementById('availableItemsSelect').innerHTML = '<option disabled selected>Select item...</option>';
     document.getElementById('itemSearchInput').value = '';
     document.getElementById('itemDetails').classList.add('hidden');
@@ -3391,10 +3510,24 @@ async function recordProduction() {
     document.getElementById('productionQuantity').value = 1;
     document.getElementById('productionRejectedQty').value = 0;
     document.getElementById('productionNotes').value = '';
+
+    // STEP 11: Refresh views
     setTimeout(() => loadAvailableItems(), 100);
-    updateStats(); renderProductionList(); renderWorkOrdersList(); renderDashboard();
+    updateStats();
+    renderProductionList();
+    renderWorkOrdersList();
+    renderDashboard();
+
+    if (currentWorkOrder && currentWorkOrder.id === parseInt(woId)) {
+        try { showWorkOrderDetails(parseInt(woId)); } catch (e) { /* ignore */ }
+    }
+
     await updateIdealRatesFromActual();
-    showToast(translations[currentLanguage].productionRecorded || 'Production recorded successfully', 'success');
+
+    const doneMsg = autoCompletedOps.length > 0
+        ? `Production recorded successfully (Balance auto-completed ${autoCompletedOps.length} previous operation${autoCompletedOps.length > 1 ? 's' : ''})`
+        : (translations[currentLanguage].productionRecorded || 'Production recorded successfully');
+    showToast(doneMsg, 'success');
 }
 
 // ====== Downtime ======

@@ -1,4 +1,7 @@
-// renderer.js - Tower Manufacturing Management System v2.4.2
+// renderer.js - Tower Manufacturing Management System v2.5.0
+// ✅ v2.5.0: إصلاح جذري لتعارض الحالات/سجلات الإنتاج — حماية Revision على أوامر الشغل (يرفض الحفظ القديم بدل أن يمسح عمل الآخرين)،
+//           مزامنة تلقائية كل 15 ثانية، منع استبدال سجلات الإنتاج كلها عند رفع موديل، وتجاهل السجلات الوهمية عند فشل الحفظ.
+// (الإصدار السابق: v2.4.2)
 // ============================================================================
 // ✅ v2.4.2: إصلاح Balance Mode — عند إدخال عملية Finish مع تفعيل Balance
 //           تُكمل جميع العمليات السابقة تلقائياً بعامل "Balance" (بما فيها
@@ -33,6 +36,9 @@ let employeesDB = [];
 let usersDB = [];
 let balanceMode = false;
 let syncedRecordIds = new Set();
+let woRev = null;     // revision of workOrdersDB as last seen from the server
+let prodRev = null;   // revision of production records as last seen from the server
+let syncing = false;
 let dataReady = false;
 let pendingSaves = 0;
 const lastSavePayload = {};
@@ -516,19 +522,38 @@ function getYesterdayDateStr() {
     return getLocalDateStr(d);
 }
 
-async function saveToServer(dataType, data) {
+async function saveToServer(dataType, data, opts = {}) {
+    const result = await _saveToServerOnce(dataType, data, opts);
+    if (result && result.stale) await syncFromServer(true);
+    return result;
+}
+
+async function _saveToServerOnce(dataType, data, opts = {}) {
     if (!dataReady) { showToast('⛔ الحفظ معطّل: لم يتم تحميل البيانات من الخادم بعد.', 'error'); return { success: false, error: 'data not loaded' }; }
+    const isWO = dataType === 'workOrdersDB';
     lastSavePayload[dataType] = JSON.stringify(data);
     unconfirmedTypes.add(dataType);
     pendingSaves++;
     try {
-        const response = await fetch(`${SERVER_URL}/api/data/${dataType}`, {
+        let url = `${SERVER_URL}/api/data/${dataType}`;
+        if (isWO && woRev !== null) url += `?baseRev=${woRev}` + (opts.force ? '&force=1' : '');
+        const response = await fetch(url, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: lastSavePayload[dataType]
         });
+        if (response.status === 409 && isWO) {
+            // نسخة هذا الجهاز أقدم من نسخة الخادم: ارفض الحفظ بدل مسح عمل الآخرين
+            unconfirmedTypes.delete(dataType);
+            delete lastSavePayload[dataType];
+            showToast('⚠ تم تعديل أوامر الشغل من جهاز آخر. جرى تحميل أحدث نسخة — يرجى إعادة العملية.', 'warning');
+            return { success: false, error: 'stale', stale: true };
+        }
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         if (!result.success) showToast('Error saving data: ' + (result.error || 'Unknown error'), 'error');
-        else unconfirmedTypes.delete(dataType);
+        else {
+            unconfirmedTypes.delete(dataType);
+            if (isWO && typeof result.rev === 'number') woRev = result.rev;
+        }
         return result;
     } catch (error) {
         console.error('Error saving to server:', error);
@@ -544,7 +569,8 @@ function flushUnsavedOnClose() {
         if (payload === undefined) return;
         try {
             const blob = new Blob([payload], { type: 'application/json' });
-            navigator.sendBeacon(`${SERVER_URL}/api/data/${dataType}`, blob);
+            const q = (dataType === 'workOrdersDB' && woRev !== null) ? `?baseRev=${woRev}` : '';
+            navigator.sendBeacon(`${SERVER_URL}/api/data/${dataType}${q}`, blob);
         } catch (e) { console.error('flushUnsavedOnClose failed for', dataType, e); }
     });
     try {
@@ -578,6 +604,59 @@ async function loadFromServer(dataType) {
     return await response.json();
 }
 
+// ============= SYNC (v2.5.0) =============
+async function fetchRevs() {
+    const r = await fetch(`${SERVER_URL}/api/rev`);
+    if (!r.ok) throw new Error('rev HTTP ' + r.status);
+    return await r.json();
+}
+
+function snapshotUnsynced() {
+    return new Set(productionDB.filter(r => !syncedRecordIds.has(r.id)).map(r => r.id));
+}
+// عند فشل حفظ أمر الشغل: احذف السجلات الوهمية التي أُنشئت في هذه العملية فقط
+function discardUnsyncedSince(snapshot) {
+    productionDB = productionDB.filter(r => syncedRecordIds.has(r.id) || snapshot.has(r.id));
+}
+
+async function syncFromServer(force = false) {
+    if (!dataReady || syncing) return;
+    const busyNow = () => pendingSaves > 0 || unconfirmedTypes.size > 0 ||
+        (document.getElementById('loadingModal') && document.getElementById('loadingModal').classList.contains('active'));
+    if (!force && busyNow()) return;
+    syncing = true;
+    try {
+        const revs = await fetchRevs();
+        const woChanged = woRev !== revs.workOrdersDB;
+        const prodChanged = prodRev !== revs.production;
+        if (!force && !woChanged && !prodChanged) return;
+        let newWO = null, newProd = null;
+        if (woChanged || force) {
+            newWO = await loadFromServer('workOrdersDB');
+            newWO.forEach(wo => { if (wo.archived === undefined) wo.archived = false; });
+        }
+        if (prodChanged || force) {
+            const localUnsynced = productionDB.filter(r => !syncedRecordIds.has(r.id));
+            const serverArr = await loadProductionRecords();
+            newProd = serverArr.concat(localUnsynced);
+        }
+        // تحقق مرة أخرى: لو بدأ المستخدم عملية أثناء التحميل فلا نستبدل ذاكرته
+        if (!force && busyNow()) return;
+        if (newWO) { workOrdersDB = newWO; woRev = revs.workOrdersDB; if (currentWorkOrder) currentWorkOrder = workOrdersDB.find(w => w.id === currentWorkOrder.id) || null; }
+        if (newProd) { productionDB = newProd; prodRev = revs.production; }
+        [updateStats, renderWorkOrdersList, renderDashboard, renderProductionList].forEach(fn => { try { fn(); } catch (e) { } });
+    } catch (e) {
+        console.warn('syncFromServer failed:', e.message);
+    } finally { syncing = false; }
+}
+
+let syncTimer = null;
+function startSyncPolling() {
+    if (syncTimer) return;
+    syncTimer = setInterval(() => { if (!document.hidden) syncFromServer(false); }, 15000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncFromServer(false); });
+}
+
 async function loadProductionRecords() {
     const response = await fetch(`${SERVER_URL}/api/production/all`);
     if (response.ok) {
@@ -603,7 +682,7 @@ async function flushNewProductionRecords() {
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
-        if (result.success) pending.forEach(r => syncedRecordIds.add(r.id));
+        if (result.success) { pending.forEach(r => syncedRecordIds.add(r.id)); if (typeof result.rev === 'number' && prodRev !== null && result.rev === prodRev + 1) prodRev = result.rev; }
         else showToast('Error saving production: ' + (result.error || 'Unknown error'), 'error');
         return result;
     } catch (error) {
@@ -631,12 +710,13 @@ async function deleteProductionRecordOnServer(recId) {
 async function replaceAllProductionRecordsOnServer() {
     if (!dataReady) return { success: false, error: 'data not loaded' };
     try {
-        const response = await fetch(`${SERVER_URL}/api/production/replace-all`, {
+        const response = await fetch(`${SERVER_URL}/api/production/replace-all?restore=1`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(productionDB)
         });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         syncedRecordIds = new Set(productionDB.map(r => r.id));
+        if (typeof result.rev === 'number') prodRev = result.rev;
         return result;
     } catch (error) {
         console.error('Error replacing production records:', error);
@@ -751,7 +831,9 @@ function repairLegacyGalvanizingOperations() {
 async function loadData() {
     try {
         db = await loadFromServer('towerDB');
+        const _revs = await fetchRevs();
         workOrdersDB = await loadFromServer('workOrdersDB');
+        woRev = _revs.workOrdersDB;
         workOrdersDB.forEach(wo => { if (wo.archived === undefined) wo.archived = false; });
         const repairedQty = repairLegacyCompletedQuantities();
         const repairedGalv = repairLegacyGalvanizingOperations();
@@ -765,6 +847,7 @@ async function loadData() {
             await createProductionRecordsForArchivedOrders();
         }
         productionDB = await loadProductionRecords();
+        prodRev = _revs.production;
         const operatorsData = await loadFromServer('machineOperatorsDB');
         machineOperatorsDB = operatorsData || {};
         const preferencesData = await loadFromServer('productionPreferences');
@@ -775,6 +858,7 @@ async function loadData() {
         employeesDB = await loadFromServer('employeesDB');
         await loadUsers();
         dataReady = true;
+        startSyncPolling();
     } catch (error) {
         console.error('Error loading data:', error);
         dataReady = false;
@@ -786,7 +870,7 @@ async function loadData() {
 async function saveAllData() {
     try {
         await saveToServer('towerDB', db);
-        await saveToServer('workOrdersDB', workOrdersDB);
+        await saveToServer('workOrdersDB', workOrdersDB, { force: true });
         await replaceAllProductionRecordsOnServer();
         await saveToServer('machineOperatorsDB', machineOperatorsDB);
         await saveToServer('productionPreferences', productionPreferences);
@@ -2380,6 +2464,7 @@ async function approveItem(workOrderId, itemIndex) {
         return;
     }
     const today = new Date().toISOString().split('T')[0];
+    const _snapApprove = snapshotUnsynced();
     let anyNewRecord = false;
     for (const op of item.operations) {
         const comp = item.completedOperations[op.name];
@@ -2421,7 +2506,7 @@ async function approveItem(workOrderId, itemIndex) {
     item.completedQuantity = recalcItemCompletedQuantity(item);
     recalcItemStatus(item);
     const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
-    if (!woSaveResult || !woSaveResult.success) { showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
+    if (!woSaveResult || !woSaveResult.success) { discardUnsyncedSince(_snapApprove); showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
     await flushNewProductionRecords();
     showWorkOrderDetails(workOrderId); renderWorkOrdersList(); renderDashboard();
     updateStats(); await updateIdealRatesFromActual();
@@ -2464,6 +2549,7 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
     if (!completionDate || !/^\d{4}-\d{2}-\d{2}$/.test(completionDate)) { showToast('Invalid or missing date', 'warning'); return; }
     if (!confirm(`Complete item "${item.itemName}" with remaining ${remaining} pcs as Balance on ${completionDate}?`)) return;
     showLoading(translations[currentLanguage].processing);
+    const _snapBal = snapshotUnsynced();
     try {
         let updated = false;
         for (const op of item.operations) {
@@ -2497,7 +2583,7 @@ async function completeItemAsBalance(workOrderId, itemIndex) {
         item.completedQuantity = recalcItemCompletedQuantity(item);
         recalcItemStatus(item);
         const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
-        if (!woSaveResult || !woSaveResult.success) { hideLoading(); showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
+        if (!woSaveResult || !woSaveResult.success) { discardUnsyncedSince(_snapBal); hideLoading(); showToast('تعذّر حفظ تحديث أمر الشغل على الخادم.', 'error'); return; }
         await flushNewProductionRecords();
         renderWorkOrdersList(); renderDashboard(); updateStats();
         await updateIdealRatesFromActual();
@@ -2646,7 +2732,7 @@ async function processData() {
         if (items.length === 0) { hideLoading(); showToast('No valid data found', 'error'); return; }
         db = db.filter(m => m.model !== model);
         db.push({ id: Date.now(), type, model, date: new Date().toLocaleDateString(), items });
-        await saveAllData();
+        await saveToServer('towerDB', db);
         updateStats(); renderModelsList(); populateTowerTypeDropdown(); populateProductionTowerTypeDropdown();
         document.getElementById('uploadForm').reset(); document.getElementById('fileName').classList.add('hidden'); currentExcelData = [];
         if (ENTRY_PANEL_AUTO_CLOSE) closeEntryPanel('models');
@@ -3054,6 +3140,7 @@ async function processProductionExcel() {
 
     showLoading('Processing production records...');
     await yieldToUI();
+    const _snapXls = snapshotUnsynced();
 
     try {
         const headerRow = (currentProductionExcelData[0] || []).map(c => c === undefined ? '' : c);
@@ -3293,6 +3380,7 @@ async function processProductionExcel() {
         if (results.success > 0) {
             const woSaveResult = await saveToServer('workOrdersDB', workOrdersDB);
             if (!woSaveResult || !woSaveResult.success) {
+                discardUnsyncedSince(_snapXls);
                 hideLoading();
                 showToast('تعذّر حفظ تحديث أوامر الشغل على الخادم.', 'error');
                 return;

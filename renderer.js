@@ -1040,7 +1040,7 @@ const translations = {
         confirm: "Confirm ", cancel: "Cancel ", recordDeleted: "Record deleted successfully ",
         modelDeleted: "Model deleted successfully ", workOrderDeleted: "Work order deleted successfully ",
         productionDeleted: "Production record deleted successfully ", downtimeDeleted: "Downtime record deleted successfully ",
-        selectReportType: "Select Report Type ", backupRestore: "Backup Management ",
+        selectReportType: "Select Report Type ", progressReports: "Progress Reports", productsReports: "Product Reports", performanceReports: "Performance Reports", itemsCurrentStatus: "Items Current Status", itemsCurrentStatusDesc: "Upload an Excel file listing items to see each item's current status (from file)", itemsStatusDesc: "Detailed status of items in a selected work order", backupRestore: "Backup Management ",
         createBackup: "Create Backup ", saveAllData: "Save all system data to a JSON file ",
         restoreBackup: "Restore Backup ", restoreData: "Restore data from a backup file ",
         downtimeRecording: "Downtime Recording ", downtimeType: "Fault Type ",
@@ -1192,7 +1192,7 @@ const translations = {
         confirm: "تأكيد ", cancel: "إلغاء ", recordDeleted: "تم حذف السجل بنجاح ",
         modelDeleted: "تم حذف النموذج بنجاح ", workOrderDeleted: "تم حذف أمر الشغل بنجاح ",
         productionDeleted: "تم حذف سجل الإنتاج بنجاح ", downtimeDeleted: "تم حذف سجل التوقف بنجاح ",
-        selectReportType: "اختر نوع التقرير ", backupRestore: "إدارة النسخ الاحتياطي ",
+        selectReportType: "اختر نوع التقرير ", progressReports: "تقارير التقدم", productsReports: "تقارير المنتجات", performanceReports: "تقارير الأداء", itemsCurrentStatus: "الموقف الحالي للبنود", itemsCurrentStatusDesc: "ارفع ملف Excel بقائمة البنود لعرض الموقف الحالي لكل بند (من الملف)", itemsStatusDesc: "الحالة المفصلة لبنود أمر شغل محدد", backupRestore: "إدارة النسخ الاحتياطي ",
         createBackup: "إنشاء نسخة احتياطية ", saveAllData: "حفظ جميع بيانات النظام في ملف JSON ",
         restoreBackup: "استعادة النسخة الاحتياطية ", restoreData: "استعادة البيانات من ملف نسخ احتياطي ",
         downtimeRecording: "تسجيل التوقفات ", downtimeType: "نوع العطل ",
@@ -4269,6 +4269,49 @@ function calculateOEEAndTEEPForMachine(machine, startDate, endDate) {
     return { availability, performance, quality, oee, teep, utilization, totalPlannedMinutes, totalOperatingMinutes, totalCalendarMinutes, totalGoodPieces, totalIdealPieces, totalProduced, totalRejected };
 }
 
+
+// ====== Report groups (Progress / Products / Performance) ======
+const REPORT_TYPE_GROUPS = {
+    monthlyProduction: 'progress', dailyProduction: 'progress',
+    salesOrderTree: 'products', projectStageSummary: 'products', minimumStoppage: 'products',
+    itemsStatus: 'products', operationStatus: 'products', detailedItem: 'products', itemsLookup: 'products',
+    shortage: 'performance', downtime: 'performance', ncrReport: 'performance', oeeReport: 'performance', teepReport: 'performance'
+};
+let activeReportGroup = null;
+
+// هل يُسمح للمستخدم الحالي بفتح هذا التقرير؟ (تقرير NCR للجودة والإنتاج والمدير فقط)
+function canOpenReportType(type) {
+    const user = getCurrentUser();
+    if (!user || !hasPermission('canViewReports')) return false;
+    if (type === 'ncrReport' && user.role !== ROLES.QC && user.role !== ROLES.PRODUCTION && user.role !== ROLES.ADMINISTRATOR) return false;
+    return true;
+}
+
+function showReportGroup(group, forceOpen) {
+    // الضغط على نفس المجموعة مرة ثانية يطويها
+    if (!forceOpen && activeReportGroup === group) group = null;
+    const changed = activeReportGroup !== group;
+    activeReportGroup = group;
+    document.querySelectorAll('#reportCardsContainer [data-report-group]').forEach(card => {
+        const m = (card.getAttribute('onclick') || '').match(/selectReportType\('(\w+)'\)/);
+        const type = m ? m[1] : '';
+        const inGroup = card.getAttribute('data-report-group') === group;
+        card.classList.toggle('hidden', !inGroup || !canOpenReportType(type));
+    });
+    document.querySelectorAll('.report-group-btn').forEach(btn => {
+        btn.classList.toggle('active-group', group !== null && btn.id === 'reportGroupBtn-' + group);
+    });
+    // عند تبديل المجموعة يدوياً: أغلق نموذج التقرير ونتائجه المفتوحة
+    if (!forceOpen && changed) {
+        const forms = document.getElementById('reportFormsContainer');
+        const results = document.getElementById('reportResults');
+        if (forms) { forms.classList.add('hidden'); forms.innerHTML = ''; }
+        if (results) results.classList.add('hidden');
+        const strip = document.getElementById('reportSummaryStrip');
+        if (strip) strip.innerHTML = '';
+    }
+}
+
 // ====== Reports Generation ======
 function selectReportType(type) {
     const user = getCurrentUser();
@@ -4277,6 +4320,7 @@ function selectReportType(type) {
         showToast('هذا التقرير مخصص لإدارة الجودة أو الإنتاج', 'warning');
         return;
     }
+    if (REPORT_TYPE_GROUPS[type] && activeReportGroup !== REPORT_TYPE_GROUPS[type]) showReportGroup(REPORT_TYPE_GROUPS[type], true);
     const container = document.getElementById('reportFormsContainer');
     if (!container) return;
     const summaryStrip = document.getElementById('reportSummaryStrip');
@@ -4329,6 +4373,9 @@ function selectReportType(type) {
             break;
         case 'itemsStatus':
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">${translations[currentLanguage].itemsStatusReport || 'Items Status Report'}</h3><p class="text-sm text-gray-500 mb-3">${translations[currentLanguage].detailedStatus || 'Get detailed status of items'}</p><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">${translations[currentLanguage].selectWorkOrder || 'Select Work Order'}</label><select id="reportWorkOrder" class="input-field"></select></div><div class="input-group"><label class="input-label">Search Work Order Number</label><input type="text" id="reportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterWorkOrderSelect()"></div></div><button onclick="generateItemsStatusReport()" class="btn btn-primary mt-4">${translations[currentLanguage].generateItemsStatus || 'Generate Items Status Report'}</button></div>`;
+            break;
+        case 'itemsLookup':
+            html = `<div class="card p-4"><h3 class="text-lg font-bold mb-2"><i class="fa-solid fa-magnifying-glass-chart mr-2 text-sky-600"></i> ${ilT('الموقف الحالي للبنود', 'Items Current Status')}</h3><p class="text-sm text-gray-500 mb-4">${ilT('حمّل النموذج، عبّئ أسماء البنود فيه، ثم ارفعه ليعرض البرنامج موقف كل بند. البحث يعمل مع البادئة (prefix) أو بدونها.', 'Download the template, fill in the item names, then upload it. Search works with or without the prefix.')}</p><button type="button" onclick="downloadItemsLookupTemplate()" class="btn btn-outline mb-4"><i class="fa-solid fa-download"></i> ${ilT('تنزيل النموذج', 'Download Template')}</button><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">${ilT('أمر الشغل', 'Work Order')}</label><select id="itemsLookupWorkOrder" class="input-field"></select></div><div class="input-group"><label class="input-label">${ilT('بحث في أوامر الشغل', 'Search Work Orders')}</label><input type="text" id="itemsLookupWorkOrderSearch" class="input-field" placeholder="${ilT('اكتب اسم أمر الشغل أو المشروع...', 'Type work order or project...')}" oninput="ilFilterWorkOrders()"></div></div><div class="input-group mb-4"><label class="input-label">${ilT('ملف النموذج المعبّأ (Excel)', 'Filled Template (Excel)')}</label><div class="backup-card p-4 rounded-lg text-center cursor-pointer" onclick="document.getElementById('itemsLookupFile').click()"><i class="fa-solid fa-cloud-arrow-up text-3xl text-sky-400 mb-2"></i><p class="text-sm font-medium text-gray-700">${ilT('اضغط لرفع ملف .xlsx / .xls', 'Click to upload .xlsx / .xls')}</p><input type="file" id="itemsLookupFile" accept=".xlsx,.xls" class="hidden" onchange="handleItemsLookupFileSelect(event)"></div><div id="itemsLookupFileName" class="text-sm text-green-600 mt-2 hidden"></div></div><button onclick="generateItemsLookupReport()" class="btn btn-primary mt-2"><i class="fa-solid fa-magnifying-glass"></i> ${ilT('بحث وعرض الموقف', 'Search & Show Position')}</button></div>`;
             break;
         case 'detailedItem':
             html = `<div class="card p-4"><h3 class="text-lg font-bold mb-4">Detailed Item Report</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"><div class="input-group"><label class="input-label">Select Work Order</label><select id="detailReportWorkOrder" class="input-field" onchange="populateItemsForReport()"></select></div><div class="input-group"><label class="input-label">Search Work Order</label><input type="text" id="detailReportWorkOrderSearch" class="input-field" placeholder="Type work order name or project..." oninput="filterDetailWorkOrderSelect()"></div></div><div id="itemSelectionContainer" class="hidden"><div class="input-group mt-4"><label class="input-label">Search Item</label><input type="text" id="detailItemSearchInput" class="input-field" onkeyup="filterItemsForReport()" placeholder="Search item..."></div><div class="input-group"><label class="input-label">Select Item</label><select id="detailReportItem" class="input-field"></select></div></div><button onclick="generateDetailedItemReport()" class="btn btn-primary mt-4">Generate Report</button></div>`;
@@ -4386,6 +4433,7 @@ function selectReportType(type) {
     if (type === 'ncrReport') { document.getElementById('ncrReportFromDate').value = getLocalDateStr(); document.getElementById('ncrReportToDate').value = getLocalDateStr(); }
     if (type === 'oeeReport') { document.getElementById('oeeReportFromDate').value = getLocalDateStr(); document.getElementById('oeeReportToDate').value = getLocalDateStr(); }
     if (type === 'teepReport') { document.getElementById('teepReportFromDate').value = getLocalDateStr(); document.getElementById('teepReportToDate').value = getLocalDateStr(); }
+    if (type === 'itemsLookup') ilInit();
     if (type === 'itemsStatus' || type === 'detailedItem') {
         populateReportDropdowns();
         if (type === 'itemsStatus') { const s = document.getElementById('reportWorkOrderSearch'); if (s) s.value = ''; }
@@ -4493,6 +4541,267 @@ async function generateItemsStatusReport() {
         document.getElementById('reportResults').classList.remove('hidden');
         document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
         showToast('Items status report generated', 'success');
+    } catch (err) { console.error(err); showToast('Error generating report', 'error'); }
+    finally { hideLoading(); }
+}
+
+// ============================================================================
+// ✅ ITEMS LOOKUP — بحث موقف البنود من نموذج Excel ملتزم ببنية محددة
+// - يُنزَّل النموذج من زر Download Template ويجب الالتزام ببنيته
+// - المطابقة تهمل الـ prefix: يبحث بالاسم كما هو، وبالاسم مع/بدون بادئة
+// ============================================================================
+let itemsLookupRows = null;      // بيانات الصفوف (بدون صف العناوين)
+let itemsLookupItemCol = 0;
+let itemsLookupQtyCol = -1;
+
+const IL_TEMPLATE_ITEM_HEADER = 'Item Name';
+const IL_TEMPLATE_QTY_HEADER = 'Quantity';
+
+function ilT(ar, en) { return currentLanguage === 'ar' ? ar : en; }
+
+function ilNorm(v) {
+    if (v === null || v === undefined) return '';
+    return String(v).replace(/[\u200B-\u200F\u202A-\u202E\uFEFF]/g, '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+// مفتاح مرن: يتجاهل المسافات والشرطات والشرطة السفلية والنقاط
+function ilLoose(v) { return ilNorm(v).replace(/[\s\-_\.]/g, ''); }
+
+// هل longName = (prefix + فاصل + shortName)؟
+function ilEndsWithSep(longName, shortName) {
+    if (!shortName || longName.length <= shortName.length) return false;
+    if (!longName.endsWith(shortName)) return false;
+    return /[\s\-_\/\.:]/.test(longName.charAt(longName.length - shortName.length - 1));
+}
+
+// ---------- تنزيل النموذج ----------
+function downloadItemsLookupTemplate() {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([[IL_TEMPLATE_ITEM_HEADER, IL_TEMPLATE_QTY_HEADER]]);
+    ws['!cols'] = [{ wch: 32 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Items');
+    const info = [
+        ['تعليمات تعبئة النموذج / Template Instructions'],
+        [],
+        ['1', 'اكتب اسم كل بند في العمود A (Item Name) — حقل إلزامي. / Enter each item name in column A (required).'],
+        ['2', 'العمود B (Quantity) اختياري: إذا عُبّئ فسيقارنه البرنامج بكمية أمر الشغل. / Column B is optional.'],
+        ['3', 'لا تغيّر عناوين الصف الأول ولا ترتيب الأعمدة، وابدأ البيانات من الصف الثاني. / Do not change the header row.'],
+        ['4', 'الـ prefix اختياري: يمكن كتابة البند بالبادئة أو بدونها (مثال: T1-L50-12 أو L50-12) وسيجده البرنامج في الحالتين. / Prefix is optional.'],
+        ['5', 'يُقرأ أول Sheet فقط (Items). / Only the first sheet is read.']
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(info);
+    ws2['!cols'] = [{ wch: 6 }, { wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
+    XLSX.writeFile(wb, 'Items_Lookup_Template.xlsx');
+    showToast(ilT('تم تنزيل النموذج', 'Template downloaded'), 'success');
+}
+
+// ---------- أوامر الشغل ----------
+function ilGetScopeWorkOrders() {
+    const sel = document.getElementById('itemsLookupWorkOrder');
+    const v = sel ? sel.value : 'all';
+    if (!v || v === 'all') return workOrdersDB;
+    const wo = workOrdersDB.find(w => w.id === parseInt(v));
+    return wo ? [wo] : [];
+}
+
+function ilPopulateWorkOrders(filterText) {
+    const sel = document.getElementById('itemsLookupWorkOrder');
+    if (!sel) return;
+    const prev = sel.value || 'all';
+    const q = (filterText || '').toLowerCase().trim();
+    let html = `<option value="all">${ilT('كل أوامر الشغل', 'All Work Orders')}</option>`;
+    workOrdersDB.forEach(wo => {
+        const text = `${wo.workOrderName} - ${wo.projectName}`;
+        if (q && !text.toLowerCase().includes(q)) return;
+        html += `<option value="${wo.id}">${esc(text)}</option>`;
+    });
+    sel.innerHTML = html;
+    sel.value = Array.from(sel.options).some(o => o.value === String(prev)) ? String(prev) : 'all';
+}
+
+function ilFilterWorkOrders() {
+    const s = document.getElementById('itemsLookupWorkOrderSearch');
+    ilPopulateWorkOrders(s ? s.value : '');
+}
+
+function ilInit() {
+    itemsLookupRows = null;
+    ilPopulateWorkOrders('');
+}
+
+// ---------- رفع الملف والتحقق من البنية ----------
+function handleItemsLookupFileSelect(e) {
+    const input = e.target;
+    const file = input.files[0];
+    const fn = document.getElementById('itemsLookupFileName');
+    if (!file) return;
+    const fail = (msg) => {
+        itemsLookupRows = null;
+        if (fn) { fn.textContent = msg; fn.classList.remove('hidden'); fn.style.color = '#b91c1c'; }
+        showToast(msg, 'error');
+        input.value = '';
+    };
+    const reader = new FileReader();
+    reader.onload = function (ev) {
+        try {
+            const data = new Uint8Array(ev.target.result);
+            const wb = XLSX.read(data, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const all = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            if (!all.length) return fail(ilT('الملف فارغ', 'The file is empty'));
+            const headers = (all[0] || []).map(h => ilNorm(h));
+            const itemCol = headers.findIndex(h => h === 'ITEM NAME' || h === 'ITEMNAME');
+            const qtyCol = headers.findIndex(h => h === 'QUANTITY' || h === 'QTY');
+            if (itemCol < 0) return fail(ilT('بنية الملف غير مطابقة للنموذج: العمود «Item Name» غير موجود في الصف الأول. حمّل النموذج واستخدمه.', 'File does not match the template: "Item Name" header not found in row 1. Download and use the template.'));
+            const rows = all.slice(1).filter(r => Array.isArray(r) && ilNorm(r[itemCol]) !== '');
+            if (!rows.length) return fail(ilT('لا توجد بنود تحت العناوين في الملف', 'No items found under the headers'));
+            itemsLookupRows = rows; itemsLookupItemCol = itemCol; itemsLookupQtyCol = qtyCol;
+            if (fn) { fn.style.color = ''; fn.textContent = `${ilT('تم رفع الملف', 'File uploaded')}: ${file.name} (${rows.length} ${ilT('بند', 'items')})`; fn.classList.remove('hidden'); }
+            showToast(ilT('تم قبول الملف', 'File accepted'), 'success');
+        } catch (err) { console.error(err); fail(ilT('تعذّرت قراءة الملف', 'Could not read the file')); }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// ---------- الحالة والموقف ----------
+function ilComputeItemPosition(item) {
+    const qty = parseInt(item.quantity) || 0;
+    const ops = item.operations || [];
+    const co = item.completedOperations || {};
+    const opsInfo = ops.map(op => {
+        const c = co[op.name];
+        const done = c ? (parseInt(c.completedQuantity) || 0) : 0;
+        return { name: op.name, machine: op.machine, done, complete: qty > 0 && done >= qty };
+    });
+    const allComplete = opsInfo.length > 0 && opsInfo.every(o => o.complete);
+    const anyDone = opsInfo.some(o => o.done > 0);
+    let status;
+    if (item.status === 'Blocked') status = 'Blocked';
+    else if (allComplete) status = 'Completed';
+    else if (anyDone) status = 'In Progress';
+    else status = 'Pending';
+    const currentOp = opsInfo.find(o => !o.complete) || null;
+    let lastDoneOp = null;
+    opsInfo.forEach(o => { if (o.done > 0) lastDoneOp = o; });
+    const completedQty = opsInfo.length ? Math.min(...opsInfo.map(o => o.done), qty) : 0;
+    return { qty, opsInfo, status, currentOp, lastDoneOp, completedQty };
+}
+
+function ilStatusBadge(status) {
+    const map = {
+        'Completed': { cls: 'status-completed', ar: 'مكتمل', en: 'Completed' },
+        'In Progress': { cls: 'status-in-progress', ar: 'قيد التنفيذ', en: 'In Progress' },
+        'Pending': { cls: 'status-pending', ar: 'لم يبدأ', en: 'Pending' },
+        'Blocked': { cls: '', ar: 'موقوف', en: 'Blocked', style: 'background:#e5e7eb;color:#111827;' },
+        'NotFound': { cls: '', ar: 'غير موجود في أمر الشغل', en: 'Not in Work Order', style: 'background:#ede9fe;color:#5b21b6;' }
+    };
+    const m = map[status] || map['Pending'];
+    return `<span class="status-indicator ${m.cls}" style="${m.style || ''}">${ilT(m.ar, m.en)}</span>`;
+}
+
+// مطابقة مع إهمال الـ prefix: تطابق تام ← تطابق مرن ← تطابق مع/بدون بادئة
+function ilFindMatches(rawName, entries, exactIdx, looseIdx) {
+    const s = ilNorm(rawName);
+    let m = exactIdx.get(s);
+    if (m && m.length) return { list: m, type: 'exact' };
+    m = looseIdx.get(ilLoose(rawName));
+    if (m && m.length) return { list: m, type: 'exact' };
+    const found = entries.filter(en => {
+        const w = ilNorm(en.item.itemName);
+        return ilEndsWithSep(w, s) || ilEndsWithSep(s, w);
+    });
+    if (found.length) return { list: found, type: 'prefix' };
+    return { list: [], type: 'none' };
+}
+
+async function generateItemsLookupReport() {
+    if (!hasPermission('canViewReports')) { showToast('غير مسموح لك بعرض التقارير', 'error'); return; }
+    if (!itemsLookupRows || itemsLookupRows.length === 0) { showToast(ilT('يرجى رفع ملف النموذج أولاً', 'Please upload the template file first'), 'warning'); return; }
+    const scope = ilGetScopeWorkOrders();
+    if (scope.length === 0) { showToast(ilT('لا توجد أوامر شغل', 'No work orders found'), 'warning'); return; }
+
+    showLoading(translations[currentLanguage].processing || 'Processing...');
+    await yieldToUI();
+    try {
+        const entries = [], exactIdx = new Map(), looseIdx = new Map();
+        const addTo = (map, key, entry) => { if (!map.has(key)) map.set(key, []); map.get(key).push(entry); };
+        scope.forEach(wo => (wo.items || []).forEach(item => {
+            const entry = { wo, item };
+            entries.push(entry);
+            addTo(exactIdx, ilNorm(item.itemName), entry);
+            addTo(looseIdx, ilLoose(item.itemName), entry);
+        }));
+        const lastProd = new Map();
+        for (const rec of productionDB) {
+            const key = `${rec.workOrderId}_${rec.itemName}`;
+            const cur = lastProd.get(key);
+            if (!cur || rec.date > cur) lastProd.set(key, rec.date);
+        }
+
+        const counts = { total: 0, Completed: 0, 'In Progress': 0, Pending: 0, Blocked: 0, NotFound: 0, viaPrefix: 0 };
+        const matchedKeys = new Set();
+        const rowsHtml = [];
+        let n = 0;
+
+        for (const row of itemsLookupRows) {
+            const rawName = row[itemsLookupItemCol];
+            const reportQty = itemsLookupQtyCol >= 0 ? (parseInt(row[itemsLookupQtyCol]) || null) : null;
+            counts.total++;
+            const res = ilFindMatches(rawName, entries, exactIdx, looseIdx);
+
+            if (res.list.length === 0) {
+                n++; counts.NotFound++;
+                rowsHtml.push(`<tr><td class="text-center">${n}</td><td class="font-bold">${esc(rawName)}</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">${reportQty !== null ? reportQty : '-'}</td><td class="text-center">-</td><td class="text-center">-</td><td class="text-center">${ilStatusBadge('NotFound')}</td><td class="text-center">${ilT('لم يُعثر على البند (بالبادئة أو بدونها)', 'Item not found (with or without prefix)')}</td><td class="text-center">-</td><td class="text-center">-</td></tr>`);
+                continue;
+            }
+            const viaPrefix = res.type === 'prefix';
+            if (viaPrefix) counts.viaPrefix++;
+            res.list.forEach(({ wo, item }) => {
+                n++;
+                matchedKeys.add(`${wo.id}_${item.itemName}_${item.length}`);
+                const pos = ilComputeItemPosition(item);
+                counts[pos.status]++;
+                const remaining = Math.max(pos.qty - pos.completedQty, 0);
+                let stage;
+                if (pos.status === 'Completed') stage = ilT('اكتملت جميع المراحل', 'All stages complete');
+                else if (pos.status === 'Blocked') stage = ilT('البند موقوف', 'Item is blocked');
+                else if (pos.currentOp) {
+                    stage = `${ilT('المرحلة الحالية', 'Current stage')}: ${pos.currentOp.name} (${pos.currentOp.done}/${pos.qty})`;
+                    if (pos.lastDoneOp && pos.lastDoneOp !== pos.currentOp) stage += ` — ${ilT('آخر مرحلة منجزة', 'last done')}: ${pos.lastDoneOp.name}`;
+                } else stage = '-';
+                const opsHtml = pos.opsInfo.map(o => `<div class="text-xs p-1 rounded ${o.complete ? 'bg-green-100 text-green-800' : (o.done > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-700')} mb-1">${esc(o.name)} (${o.done}/${pos.qty})${o.complete ? ' <i class="fa-solid fa-check text-green-600 ml-1"></i>' : ''}</div> `).join('');
+                const qtyWarn = (reportQty !== null && reportQty !== pos.qty) ? ` <span title="${ilT('الكمية في الملف تختلف عن أمر الشغل', 'File qty differs from work order')}" style="color:#b45309;font-weight:700;">⚠</span>` : '';
+                const last = lastProd.get(`${wo.id}_${item.itemName}`) || '-';
+                const nameNote = (ilNorm(rawName) !== ilNorm(item.itemName)) ? ` <span class="text-xs" style="color:#6b7280;font-weight:400;">(${ilT('في الملف', 'in file')}: ${esc(rawName)})</span>` : '';
+                rowsHtml.push(`<tr><td class="text-center">${n}</td><td class="font-bold">${esc(item.itemName)}${nameNote}</td><td class="text-center">${esc(wo.workOrderName)}</td><td class="text-center">${esc(item.section || '-')}</td><td class="text-center">${esc(item.length || '-')}</td><td class="text-center">${pos.qty}</td><td class="text-center">${reportQty !== null ? reportQty : '-'}${qtyWarn}</td><td class="text-center">${pos.completedQty}</td><td class="text-center">${remaining}</td><td class="text-center">${ilStatusBadge(pos.status)}</td><td class="text-center">${esc(stage)}</td><td class="text-center">${opsHtml}</td><td class="text-center">${esc(last)}</td></tr>`);
+            });
+        }
+
+        const scopeName = scope.length === 1 ? scope[0].workOrderName : ilT('كل أوامر الشغل', 'All Work Orders');
+        document.getElementById('reportTitle').textContent = `${ilT('الموقف الحالي للبنود', 'Items Current Status')} - ${scopeName}`;
+        document.getElementById('reportTableHeader').innerHTML = `<tr><th>#</th><th>${ilT('البند', 'Item')}</th><th>${ilT('أمر الشغل', 'Work Order')}</th><th>${ilT('المقطع', 'Section')}</th><th>${ilT('الطول', 'Length')}</th><th>${ilT('كمية أمر الشغل', 'WO Qty')}</th><th>${ilT('كمية الملف', 'File Qty')}</th><th>${ilT('المنجز', 'Completed')}</th><th>${ilT('المتبقي', 'Remaining')}</th><th>${ilT('الحالة', 'Status')}</th><th>${ilT('الموقف الحالي', 'Current Position')}</th><th>${ilT('العمليات', 'Operations')}</th><th>${ilT('آخر تاريخ إنتاج', 'Last Production')}</th></tr>`;
+        document.getElementById('reportTableBody').innerHTML = rowsHtml.join('');
+
+        const chip = (label, val, bg, fg) => `<div style="background:${bg};color:${fg};padding:8px 14px;border-radius:10px;min-width:110px;text-align:center;"><div style="font-size:1.25rem;font-weight:700;">${val}</div><div style="font-size:0.75rem;">${label}</div></div>`;
+        let extra = '';
+        if (scope.length === 1) {
+            const notInFile = (scope[0].items || []).filter(it => !matchedKeys.has(`${scope[0].id}_${it.itemName}_${it.length}`)).length;
+            extra = chip(ilT('بنود أمر الشغل غير المذكورة في الملف', 'WO items not in file'), notInFile, '#f3f4f6', '#374151');
+        }
+        const strip = document.getElementById('reportSummaryStrip');
+        if (strip) strip.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;">`
+            + chip(ilT('إجمالي بنود الملف', 'Items in file'), counts.total, '#e0e7ff', '#1e3a8a')
+            + chip(ilT('مكتمل', 'Completed'), counts.Completed, '#d1fae5', '#065f46')
+            + chip(ilT('قيد التنفيذ', 'In Progress'), counts['In Progress'], '#fef3c7', '#92400e')
+            + chip(ilT('لم يبدأ', 'Pending'), counts.Pending, '#fee2e2', '#991b1b')
+            + (counts.Blocked ? chip(ilT('موقوف', 'Blocked'), counts.Blocked, '#e5e7eb', '#111827') : '')
+            + chip(ilT('غير موجود في أمر الشغل', 'Not found'), counts.NotFound, '#ede9fe', '#5b21b6')
+            + (counts.viaPrefix ? chip(ilT('طُوبقت مع إهمال البادئة', 'Matched ignoring prefix'), counts.viaPrefix, '#e0f2fe', '#075985') : '')
+            + extra + `</div>`;
+
+        document.getElementById('reportResults').classList.remove('hidden');
+        document.getElementById('reportResults').scrollIntoView({ behavior: 'smooth' });
+        showToast(ilT('تم إنشاء التقرير', 'Report generated'), 'success');
     } catch (err) { console.error(err); showToast('Error generating report', 'error'); }
     finally { hideLoading(); }
 }
@@ -5122,7 +5431,7 @@ function switchTab(tab) {
     document.querySelector(`.sidebar-tab[data-tab="${tab}"]`).classList.add('active');
     if (tab === 'workOrder') populateTowerTypeDropdown();
     else if (tab === 'production') { populateProductionTowerTypeDropdown(); loadProductionPreferences(); renderProductionList(); }
-    else if (tab === 'reports') { }
+    else if (tab === 'reports') { if (!activeReportGroup) showReportGroup('products', true); }
     else if (tab === 'downtime') {
         document.getElementById('downtimeDate').value = getLocalDateStr();
         const workerGroup = document.getElementById('workerNameGroup');

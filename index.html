@@ -346,6 +346,10 @@
         .so-badge-neutral { background: #94a3b8; }
         @keyframes so-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
     </style>
+<style>
+.report-group-btn.active-group{background:#4338ca;color:#fff;border-color:#4338ca;box-shadow:0 4px 12px rgba(67,56,202,.35)}
+.report-group-btn.active-group i{color:#fff!important}
+</style>
 </head>
 <body class="text-gray-800 ltr">
 
@@ -1123,39 +1127,23 @@
                     <h2 class="text-xl font-bold"><i class="fa-solid fa-chart-column mr-2 text-teal-600"></i> <span data-i18n="reports">Reports</span></h2>
                 </div>
                 <div class="card-body">
+                    
+                    <!-- Report groups -->
+                    <div id="reportGroupsBar" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <button type="button" id="reportGroupBtn-progress" onclick="showReportGroup('progress')" class="report-group-btn btn btn-outline w-full py-4 text-lg font-bold">
+                            <i class="fa-solid fa-bars-progress mr-2 text-purple-600"></i> <span data-i18n="progressReports">Progress Reports</span>
+                        </button>
+                        <button type="button" id="reportGroupBtn-products" onclick="showReportGroup('products')" class="report-group-btn btn btn-outline w-full py-4 text-lg font-bold">
+                            <i class="fa-solid fa-boxes-stacked mr-2 text-blue-600"></i> <span data-i18n="productsReports">Product Reports</span>
+                        </button>
+                        <button type="button" id="reportGroupBtn-performance" onclick="showReportGroup('performance')" class="report-group-btn btn btn-outline w-full py-4 text-lg font-bold">
+                            <i class="fa-solid fa-gauge-high mr-2 text-indigo-600"></i> <span data-i18n="performanceReports">Performance Reports</span>
+                        </button>
+                    </div>
+
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="reportCardsContainer">
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-emerald-500" onclick="selectReportType('salesOrderTree')">
-                            <div class="p-4">
-                                <div class="flex items-center gap-3 mb-2">
-                                    <i class="fa-solid fa-sitemap text-2xl text-emerald-600"></i>
-                                    <h3 class="font-bold text-lg">Sales Order Family Tree</h3>
-                                </div>
-                                <p class="text-sm text-gray-500">Hierarchical tree for each Sales Order with its Work Orders, status and delay alerts</p>
-                            </div>
-                        </div>
-
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-teal-500" onclick="selectReportType('projectStageSummary')">
-                            <div class="p-4">
-                                <div class="flex items-center gap-3 mb-2">
-                                    <i class="fa-solid fa-layer-group text-2xl text-teal-600"></i>
-                                    <h3 class="font-bold text-lg" data-i18n="stageSummaryReport">Project Stage Summary</h3>
-                                </div>
-                                <p class="text-sm text-gray-500" data-i18n="stageSummaryDesc">Completed vs in-progress per manufacturing stage, with totals</p>
-                            </div>
-                        </div>
-
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-amber-500" onclick="selectReportType('minimumStoppage')">
-                            <div class="p-4">
-                                <div class="flex items-center gap-3 mb-2">
-                                    <i class="fa-solid fa-circle-stop text-2xl text-amber-600"></i>
-                                    <h3 class="font-bold text-lg" data-i18n="minStoppageReport">WIP After Minimum</h3>
-                                </div>
-                                <p class="text-sm text-gray-500" data-i18n="minStoppageDesc">Items that completed Minimum and are still WIP in later stages</p>
-                            </div>
-                        </div>
-
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-purple-500" onclick="selectReportType('monthlyProduction')">
+                        <div data-report-group="progress" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-purple-500" onclick="selectReportType('monthlyProduction')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-calendar-alt text-2xl text-purple-600"></i>
@@ -1165,27 +1153,7 @@
                             </div>
                         </div>
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-blue-500" onclick="selectReportType('itemsStatus')">
-                            <div class="p-4">
-                                <div class="flex items-center gap-3 mb-2">
-                                    <i class="fa-solid fa-clipboard-list text-2xl text-blue-600"></i>
-                                    <h3 class="font-bold text-lg" data-i18n="itemsStatusReport">Items Status Report</h3>
-                                </div>
-                                <p class="text-sm text-gray-500" data-i18n="detailedStatus">Detailed status of items in a work order</p>
-                            </div>
-                        </div>
-
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-pink-500" onclick="selectReportType('detailedItem')">
-                            <div class="p-4">
-                                <div class="flex items-center gap-3 mb-2">
-                                    <i class="fa-solid fa-rectangle-list text-2xl text-pink-600"></i>
-                                    <h3 class="font-bold text-lg" data-i18n="detailedItemReport">Detailed Item Report</h3>
-                                </div>
-                                <p class="text-sm text-gray-500" data-i18n="detailedProduction">Production history for a specific item</p>
-                            </div>
-                        </div>
-
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-green-500" onclick="selectReportType('dailyProduction')">
+                        <div data-report-group="progress" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-green-500" onclick="selectReportType('dailyProduction')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-calendar-day text-2xl text-green-600"></i>
@@ -1195,7 +1163,47 @@
                             </div>
                         </div>
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-orange-500" onclick="selectReportType('operationStatus')">
+                        <div data-report-group="products" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-emerald-500" onclick="selectReportType('salesOrderTree')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-sitemap text-2xl text-emerald-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="soFamilyTree">Sales Order Family Tree</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="soFamilyTreeDesc">Hierarchical tree for each Sales Order with its Work Orders, status and delay alerts</p>
+                            </div>
+                        </div>
+
+                        <div data-report-group="products" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-teal-500" onclick="selectReportType('projectStageSummary')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-layer-group text-2xl text-teal-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="stageSummaryReport">Project Stage Summary</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="stageSummaryDesc">Completed vs in-progress per manufacturing stage, with totals</p>
+                            </div>
+                        </div>
+
+                        <div data-report-group="products" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-amber-500" onclick="selectReportType('minimumStoppage')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-circle-stop text-2xl text-amber-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="minStoppageReport">WIP After Minimum</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="minStoppageDesc">Items that completed Minimum and are still WIP in later stages</p>
+                            </div>
+                        </div>
+
+                        <div data-report-group="products" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-blue-500" onclick="selectReportType('itemsStatus')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-clipboard-list text-2xl text-blue-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="itemsStatusReport">Items Status Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="itemsStatusDesc">Detailed status of items in a selected work order</p>
+                            </div>
+                        </div>
+
+                        <div data-report-group="products" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-orange-500" onclick="selectReportType('operationStatus')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-microchip text-2xl text-orange-600"></i>
@@ -1205,7 +1213,27 @@
                             </div>
                         </div>
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-red-500" onclick="selectReportType('shortage')">
+                        <div data-report-group="products" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-pink-500" onclick="selectReportType('detailedItem')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-rectangle-list text-2xl text-pink-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="detailedItemReport">Detailed Item Report</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="detailedProduction">Production history for a specific item</p>
+                            </div>
+                        </div>
+
+                        <div data-report-group="products" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-sky-500" onclick="selectReportType('itemsLookup')">
+                            <div class="p-4">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <i class="fa-solid fa-magnifying-glass-chart text-2xl text-sky-600"></i>
+                                    <h3 class="font-bold text-lg" data-i18n="itemsCurrentStatus">Items Current Status</h3>
+                                </div>
+                                <p class="text-sm text-gray-500" data-i18n="itemsCurrentStatusDesc">Upload an Excel file listing items to see each item's current status (from file)</p>
+                            </div>
+                        </div>
+
+                        <div data-report-group="performance" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-red-500" onclick="selectReportType('shortage')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-triangle-exclamation text-2xl text-red-600"></i>
@@ -1215,7 +1243,7 @@
                             </div>
                         </div>
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-yellow-500" onclick="selectReportType('downtime')">
+                        <div data-report-group="performance" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-yellow-500" onclick="selectReportType('downtime')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-stopwatch text-2xl text-yellow-600"></i>
@@ -1225,7 +1253,7 @@
                             </div>
                         </div>
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-rose-500" onclick="selectReportType('ncrReport')">
+                        <div data-report-group="performance" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-rose-500" onclick="selectReportType('ncrReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-clipboard-list text-2xl text-rose-600"></i>
@@ -1235,7 +1263,7 @@
                             </div>
                         </div>
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-indigo-500" onclick="selectReportType('oeeReport')">
+                        <div data-report-group="performance" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-indigo-500" onclick="selectReportType('oeeReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-chart-line text-2xl text-indigo-600"></i>
@@ -1245,7 +1273,7 @@
                             </div>
                         </div>
 
-                        <div class="card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-cyan-500" onclick="selectReportType('teepReport')">
+                        <div data-report-group="performance" class="hidden card cursor-pointer hover:shadow-lg transition transform hover:-translate-y-1 ring-2 ring-cyan-500" onclick="selectReportType('teepReport')">
                             <div class="p-4">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i class="fa-solid fa-chart-simple text-2xl text-cyan-600"></i>
@@ -1254,6 +1282,7 @@
                                 <p class="text-sm text-gray-500" data-i18n="teepReportDesc">Total Effective Equipment Performance</p>
                             </div>
                         </div>
+
                     </div>
 
                     <div id="reportFormsContainer" class="mt-8 hidden"></div>
